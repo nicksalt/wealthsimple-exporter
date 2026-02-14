@@ -4,8 +4,9 @@ on:
   push:
     tags:
       - 'v*'
-  pull_request:
-    branches: [ main ]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -23,7 +24,7 @@ jobs:
         run: npm ci
         
       - name: Run Tests
-        run: npm test
+        run: npm test -- --run
         
       - name: Build Extension
         run: npm run build

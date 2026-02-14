@@ -1,0 +1,30 @@
+name: Feature Request
+description: Suggest a new capability or improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What user need is not currently met?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe your preferred approach.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy/Security Considerations
+      options:
+        - label: This feature can be implemented without collecting credentials.
+        - label: This feature does not require external telemetry/tracking.
+        - label: This feature does not require new non-Wealthsimple network calls.
