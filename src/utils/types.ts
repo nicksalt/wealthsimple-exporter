@@ -134,6 +134,11 @@ export interface NormalizedTransaction {
   currency: string;
   category: string;
   accountId: string;
+  // Optional trading fields
+  symbol?: string;
+  action?: string;
+  quantity?: number;
+  price?: number;
 }
 
 // --- GraphQL response wrappers ---

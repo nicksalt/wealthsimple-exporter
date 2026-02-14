@@ -10,15 +10,100 @@ let exportUIInjected = false;
 let contentAccountId: string | null = null;
 
 /**
+ * Detect current theme (light/dark)
+ */
+function getTheme(): 'light' | 'dark' {
+  // Check for data-theme attribute on html
+  const htmlTheme = document.documentElement.getAttribute('data-theme');
+  if (htmlTheme === 'light' || htmlTheme === 'dark') return htmlTheme;
+
+  // Check body classes
+  if (document.body.classList.contains('light-theme')) return 'light';
+  if (document.body.classList.contains('dark-theme')) return 'dark';
+
+  // Check computed background color of body to be sure
+  const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+  // If background is dark (low brightness), assume dark mode
+  const rgb = bodyBg.match(/\d+/g);
+  if (rgb && rgb.length >= 3) {
+    const brightness = (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
+    if (brightness < 128) return 'dark';
+  }
+
+  // Fallback to system preference
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+
+  return 'light'; // Default
+}
+
+function getPanelThemeStyles(theme: 'light' | 'dark') {
+  const isDark = theme === 'dark';
+  return {
+    // Force opaque backgrounds
+    bg: isDark ? '#1E1E1E' : '#FFFFFF',
+    text: isDark ? '#FFFFFF' : '#000000',
+    border: isDark ? '#444444' : '#CCCCCC',
+    subText: isDark ? '#AAAAAA' : '#555555',
+    inputBg: isDark ? '#2D2D2D' : '#F5F5F5',
+    inputBorder: isDark ? '#555555' : '#DDDDDD',
+    secondaryBtn: isDark ? '#2D2D2D' : '#EFEFEF',
+    primary: '#5F3DC4',
+    shadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 10px 25px rgba(0,0,0,0.2)',
+  };
+}
+
+/**
+ * Update theme variables based on current theme
+ */
+function updateTheme() {
+  const theme = getTheme();
+  const styles = getPanelThemeStyles(theme);
+  const root = document.documentElement;
+
+  // We set these on :root to be accessible by the panel
+  // Using !important to ensure they stick if there are conflicting styles (unlikely for vars but good for safety)
+  root.style.setProperty('--ws-export-bg', styles.bg);
+  root.style.setProperty('--ws-export-text', styles.text);
+  root.style.setProperty('--ws-export-border', styles.border);
+  root.style.setProperty('--ws-export-subtext', styles.subText);
+  root.style.setProperty('--ws-export-input-bg', styles.inputBg);
+  root.style.setProperty('--ws-export-input-border', styles.inputBorder);
+  root.style.setProperty('--ws-export-secondary-btn', styles.secondaryBtn);
+  root.style.setProperty('--ws-export-shadow', styles.shadow);
+}
+
+/**
+ * Observe theme changes with a more aggressive observer
+ */
+function observeThemeChanges() {
+  const observer = new MutationObserver((mutations) => {
+    // On any attribute change to html or body, re-check theme
+    updateTheme();
+  });
+
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'class', 'style'],
+  });
+
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class', 'style'],
+  });
+}
+
+/**
  * Extract account information from the current page
  */
 function extractAccountInfo(): AccountInfo {
   const url = window.location.href;
-  
+
   let accountId: string | null = null;
   let accountName: string | null = null;
   let isAccountPage = false;
-  
+
   // Wealthsimple account detail pages: /app/account-details/{account-id}
   const accountDetailsMatch = url.match(/\/app\/account-details\/([a-zA-Z0-9-_]+)/);
   if (accountDetailsMatch) {
@@ -26,7 +111,7 @@ function extractAccountInfo(): AccountInfo {
     isAccountPage = true;
     console.log('[Content] Detected account details page:', accountId);
   }
-  
+
   // Try to extract account name from page title or heading
   if (isAccountPage) {
     // Look for account name in h1 or page header
@@ -34,7 +119,7 @@ function extractAccountInfo(): AccountInfo {
     if (h1) {
       accountName = h1.textContent?.trim() || null;
     }
-    
+
     // Try other common selectors
     if (!accountName) {
       const title = document.querySelector('[data-testid="account-title"]');
@@ -42,7 +127,7 @@ function extractAccountInfo(): AccountInfo {
         accountName = title.textContent?.trim() || null;
       }
     }
-    
+
     // Fallback: extract from account ID (e.g., "tfsa-xxx" -> "TFSA")
     if (!accountName && accountId) {
       const typeMatch = accountId.match(/^([a-z]+)-/);
@@ -51,9 +136,9 @@ function extractAccountInfo(): AccountInfo {
       }
     }
   }
-  
+
   console.log('[Content] Account detection:', { accountId, accountName, isAccountPage, url });
-  
+
   return { accountId, accountName, isAccountPage };
 }
 
@@ -64,7 +149,7 @@ function getContentDateRange(days: number = 30): { startDate: string; endDate: s
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
-  
+
   return {
     startDate: start.toISOString().split('T')[0],
     endDate: end.toISOString().split('T')[0],
@@ -112,15 +197,27 @@ function injectExportUI(accountId: string): boolean {
     console.log('[Content] Export UI already injected');
     return true;
   }
-  
+
   console.log('[Content] Attempting to inject export UI...');
-  
+
+
   // Find the sidebar container with the action buttons
+  // Strategy 1: Look for standard cash/spend account action buttons
   const buttonContainers = document.querySelectorAll('.sc-11fh42v-0.sc-pllw75-0');
-  console.log('[Content] Found', buttonContainers.length, 'potential containers');
-  
+
+  // Strategy 2: Look for Trading account "Add money" / "Transfer" row
+  // Based on user snippet: <div class="sc-11fh42v-0 sc-on1vxn-0 ivtWPS haLzPS">
+  // We want to find the parent container or inject next to these buttons
+  const tradingButtonRows = document.querySelectorAll('.sc-11fh42v-0.sc-on1vxn-0.ivtWPS.haLzPS');
+
+  console.log('[Content] Found', buttonContainers.length, 'potential standard containers');
+  console.log('[Content] Found', tradingButtonRows.length, 'potential trading containers');
+
   let targetContainer: Element | null = null;
-  
+  let referenceButton: HTMLButtonElement | null = null;
+  let injectionMode: 'append' | 'sibling' = 'append';
+
+  // Check Strategy 1 (Standard Accounts)
   const containerKeywords = [
     'Interac e-Transfer',
     'Pay a bill',
@@ -129,38 +226,89 @@ function injectExportUI(accountId: string): boolean {
     'Make a payment',
     'View card settings',
     'View statements',
+    'Add money',
+    'Transfer money',
+    'Total cash available',
+    'Manage',
+    'More actions'
   ];
 
   for (const container of buttonContainers) {
     const text = container.textContent || '';
-    console.log('[Content] Container text preview:', text.substring(0, 100));
     if (containerKeywords.some((keyword) => text.includes(keyword))) {
       targetContainer = container;
-      console.log('[Content] Found target container!');
+      referenceButton = container.querySelector('button');
+      injectionMode = 'append';
+      console.log('[Content] Found standard target container');
       break;
     }
   }
-  
+
+  // Check Strategy 2 (Trading Accounts) if standard not found
+  if (!targetContainer) {
+    for (const row of tradingButtonRows) {
+      if (row.textContent?.includes('Add money') || row.textContent?.includes('Transfer')) {
+        // We found the row with buttons. We want to inject our button as a sibling to this row,
+        // likely in the parent container, so it stacks nicely.
+        // OR, we can try to append to this row if it's a flex container for buttons.
+        // Let's try to find a sibling container that holds "Total cash available" to confirm location.
+
+        // Use this row as the reference for styling
+        referenceButton = row.querySelector('button');
+
+        // Ideally we want to be in the parent of this row
+        if (row.parentElement) {
+          targetContainer = row.parentElement;
+          injectionMode = 'append'; // Append to the parent (which holds the button row)
+          console.log('[Content] Found trading target container (parent of button row)');
+        } else {
+          targetContainer = row;
+          injectionMode = 'append';
+        }
+        break;
+      }
+    }
+  }
+
+  // Strategy 3: Specific fallback for "Total cash available" text
+  if (!targetContainer) {
+    const allDivs = document.querySelectorAll('div');
+    for (const div of allDivs) {
+      if (div.textContent === 'Total cash available' && div.className.includes('fgVTwF')) {
+        // This is the header text. We want to find a place nearby.
+        // Go up to the common container
+        const parent = div.closest('.sc-11fh42v-0.dwHOys');
+        if (parent) {
+          targetContainer = parent;
+          // Find a button inside this container to use as reference
+          referenceButton = parent.querySelector('button');
+          injectionMode = 'append';
+          console.log('[Content] Found target via "Total cash available" text');
+          break;
+        }
+      }
+    }
+  }
+
   if (!targetContainer) {
     console.log('[Content] Could not find sidebar action buttons container');
     return false;
   }
-  
-  console.log('[Content] Found target container, injecting export panel...');
-  
+
+  console.log('[Content] Inecting export panel...');
+
   // Get default dates
   const { startDate, endDate } = getContentDateRange(30);
-  
+
   // Create the export button wrapper
   const buttonWrapper = document.createElement('div');
+  // Use a generic class that likely fits, or copy from reference if available
   buttonWrapper.className = 'sc-11fh42v-0 sc-on1vxn-0 dwHOys haLzPS';
   buttonWrapper.id = 'ws-exporter-button';
 
-  const referenceButton = targetContainer.querySelector('button');
-  
   // Create the button only; the panel/overlay live at document.body to avoid stacking contexts.
   buttonWrapper.innerHTML = `
-    <button type="button" role="button" width="100%" class="sc-6gl6fi-0 gfuRMt sc-ss742j-0 kBsKnu" id="ws-export-toggle-btn" style="color: inherit;">
+    <button type="button" role="button" width="100%" class="sc-6gl6fi-0 gfuRMt sc-ss742j-0 kBsKnu" id="ws-export-toggle-btn">
       <div class="sc-11fh42v-0 sc-lgsj5-0 fIYxOg iHJZiL" style="color: currentColor;">
         <svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
           <path d="M8 .5a.9.9 0 0 1 .9.9v8.07l2.437-2.437a.9.9 0 1 1 1.273 1.273l-4 4a.9.9 0 0 1-1.273 0l-4-4a.9.9 0 1 1 1.273-1.273L7.1 9.47V1.4A.9.9 0 0 1 8 .5Z" fill="currentColor"/>
@@ -170,64 +318,141 @@ function injectExportUI(accountId: string): boolean {
       <p class="sc-7l25en-0 deKTom">Export transactions</p>
     </button>
   `;
-  
-  targetContainer.appendChild(buttonWrapper);
 
-  if (referenceButton) {
-    const injectedButton = buttonWrapper.querySelector('button');
-    const injectedIcon = buttonWrapper.querySelector('button > div');
-    const injectedText = buttonWrapper.querySelector('button > p');
-    const referenceIcon = referenceButton.querySelector('div');
-    const referenceText = referenceButton.querySelector('p');
-
-    if (injectedButton) injectedButton.className = referenceButton.className;
-    if (injectedIcon && referenceIcon) injectedIcon.className = referenceIcon.className;
-    if (injectedText && referenceText) injectedText.className = referenceText.className;
+  if (targetContainer) {
+    if (injectionMode === 'append') {
+      targetContainer.appendChild(buttonWrapper);
+    } else {
+      // Sibling
+      targetContainer.parentElement?.insertBefore(buttonWrapper, targetContainer.nextSibling);
+    }
   }
 
-  const panel = document.createElement('div');
+  // --- Dynamic Style Copying ---
+  const applyStyles = () => {
+    if (!referenceButton) return;
+
+    // If styling a trading account button, the classes might be different. 
+    // We try to match the class list of the reference button to our button
+    const injectedButton = buttonWrapper.querySelector('button');
+    const injectedIcon = buttonWrapper.querySelector('button > div') as HTMLElement;
+    const injectedText = buttonWrapper.querySelector('button > p') as HTMLElement;
+
+    // Copy Classes
+    if (injectedButton) injectedButton.className = referenceButton.className;
+
+    const referenceIcon = referenceButton.querySelector('div');
+    if (injectedIcon && referenceIcon) injectedIcon.className = referenceIcon.className;
+
+    const referenceText = referenceButton.querySelector('p');
+    if (injectedText && referenceText) injectedText.className = referenceText.className;
+
+    // Copy Computed Styles (for colors that aren't handling by classes correctly on theme switch)
+    const computed = window.getComputedStyle(referenceButton);
+    const computedText = referenceText ? window.getComputedStyle(referenceText) : null;
+    const computedIcon = referenceIcon ? window.getComputedStyle(referenceIcon) : null;
+
+    if (injectedButton) {
+      // Copy critical layout and color styles
+      injectedButton.style.backgroundColor = computed.backgroundColor;
+      injectedButton.style.border = computed.border;
+      injectedButton.style.borderRadius = computed.borderRadius;
+      injectedButton.style.padding = computed.padding;
+      injectedButton.style.width = '100%'; // Ensure full width
+
+      // If the reference button has specific text color, use it. But often text color is on the <p>
+      injectedButton.style.color = computed.color;
+    }
+
+    if (injectedText && computedText) {
+      injectedText.style.color = computedText.color;
+      injectedText.style.fontSize = computedText.fontSize;
+      injectedText.style.fontWeight = computedText.fontWeight;
+    }
+
+    if (injectedIcon && computedIcon) {
+      injectedIcon.style.color = computedIcon.color;
+      // SVG inside might need fill
+      const svg = injectedIcon.querySelector('svg');
+      const refSvg = referenceIcon?.querySelector('svg');
+      if (svg && refSvg) {
+        const computedSvg = window.getComputedStyle(refSvg);
+        svg.style.fill = computedSvg.fill;
+        svg.style.color = computedSvg.color;
+      }
+    }
+  };
+
+  // Initial Apply
+  applyStyles();
+
+  // Watch for theme changes on the Reference Button to re-apply styles
+  if (referenceButton) {
+    const styleObserver = new MutationObserver(() => {
+      applyStyles();
+    });
+    // Watch attribute changes on the button itself (class changes)
+    styleObserver.observe(referenceButton, { attributes: true, attributeFilter: ['class', 'style'] });
+
+    // Also watch the body/html for theme changes to trigger a re-compute
+    const themeObserver = new MutationObserver(() => {
+      // Give a slight tick for CSS variables to update
+      setTimeout(applyStyles, 50);
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // Check if panel already exists (from a previous injection)
+  let panel = document.getElementById('ws-export-panel');
+  if (panel) panel.remove();
+
+  let overlay = document.getElementById('ws-panel-overlay');
+  if (overlay) overlay.remove();
+
+  panel = document.createElement('div');
   panel.id = 'ws-export-panel';
   panel.setAttribute(
     'style',
-    'display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 24px; z-index: 2147483647; min-width: 320px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.4);'
+    `display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--ws-export-bg); border: 1px solid var(--ws-export-border); border-radius: 12px; padding: 24px; z-index: 2147483647; min-width: 320px; max-width: 90vw; box-shadow: var(--ws-export-shadow); color: var(--ws-export-text); transition: background 0.3s, color 0.3s;`
   );
   panel.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h3 style="margin: 0; color: #F5F4F4; font-size: 18px; font-weight: 600;">Export Transactions</h3>
-      <button id="ws-close-panel" style="background: none; border: none; color: #999; cursor: pointer; font-size: 24px; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">&times;</button>
+      <h3 style="margin: 0; color: var(--ws-export-text); font-size: 18px; font-weight: 600;">Export Transactions</h3>
+      <button id="ws-close-panel" style="background: none; border: none; color: var(--ws-export-subtext); cursor: pointer; font-size: 24px; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">&times;</button>
     </div>
     
     <div style="margin-bottom: 16px;">
       <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
-        <button class="ws-range-btn" data-days="7" style="flex: 1; min-width: 60px; padding: 8px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #F5F4F4; cursor: pointer; font-size: 13px;">7d</button>
-        <button class="ws-range-btn active" data-days="30" style="flex: 1; min-width: 60px; padding: 8px 12px; background: #5F3DC4; border: 1px solid #5F3DC4; border-radius: 6px; color: #F5F4F4; cursor: pointer; font-size: 13px;">30d</button>
-        <button class="ws-range-btn" data-days="90" style="flex: 1; min-width: 60px; padding: 8px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #F5F4F4; cursor: pointer; font-size: 13px;">90d</button>
-        <button class="ws-range-btn" data-days="365" style="flex: 1; min-width: 60px; padding: 8px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #F5F4F4; cursor: pointer; font-size: 13px;">1y</button>
+        <button class="ws-range-btn" data-days="7" style="flex: 1; min-width: 60px; padding: 8px 12px; background: var(--ws-export-secondary-btn); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); cursor: pointer; font-size: 13px;">7d</button>
+        <button class="ws-range-btn active" data-days="30" style="flex: 1; min-width: 60px; padding: 8px 12px; background: #5F3DC4; border: 1px solid #5F3DC4; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px;">30d</button>
+        <button class="ws-range-btn" data-days="90" style="flex: 1; min-width: 60px; padding: 8px 12px; background: var(--ws-export-secondary-btn); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); cursor: pointer; font-size: 13px;">90d</button>
+        <button class="ws-range-btn" data-days="365" style="flex: 1; min-width: 60px; padding: 8px 12px; background: var(--ws-export-secondary-btn); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); cursor: pointer; font-size: 13px;">1y</button>
       </div>
       
       <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-direction: column;">
         <div>
-          <label style="display: block; color: #999; font-size: 12px; margin-bottom: 4px;">Start Date</label>
-          <input type="date" id="ws-start-date" value="${startDate}" style="width: 100%; padding: 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #F5F4F4; font-size: 14px;">
+          <label style="display: block; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 4px;">Start Date</label>
+          <input type="date" id="ws-start-date" value="${startDate}" style="width: 100%; padding: 8px; background: var(--ws-export-input-bg); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); font-size: 14px;">
         </div>
         <div>
-          <label style="display: block; color: #999; font-size: 12px; margin-bottom: 4px;">End Date</label>
-          <input type="date" id="ws-end-date" value="${endDate}" style="width: 100%; padding: 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #F5F4F4; font-size: 14px;">
+          <label style="display: block; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 4px;">End Date</label>
+          <input type="date" id="ws-end-date" value="${endDate}" style="width: 100%; padding: 8px; background: var(--ws-export-input-bg); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); font-size: 14px;">
         </div>
       </div>
       
-      <div id="ws-last-export-info" style="display: none; color: #999; font-size: 12px; margin-bottom: 12px; padding: 8px; background: #252525; border-radius: 6px;"></div>
+      <div id="ws-last-export-info" style="display: none; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 12px; padding: 8px; background: var(--ws-export-input-bg); border-radius: 6px;"></div>
       
       <div style="display: flex; gap: 8px; flex-direction: column;">
-        <button id="ws-export-btn" style="width: 100%; padding: 12px; background: #5F3DC4; border: none; border-radius: 6px; color: #F5F4F4; cursor: pointer; font-size: 14px; font-weight: 600;">Export Transactions</button>
-        <button id="ws-export-since-last" style="display: none; width: 100%; padding: 10px; background: #2a2a2a; border: 1px solid #5F3DC4; border-radius: 6px; color: #5F3DC4; cursor: pointer; font-size: 13px;">Export Since Last</button>
+        <button id="ws-export-btn" style="width: 100%; padding: 12px; background: #5F3DC4; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;">Export Transactions</button>
+        <button id="ws-export-since-last" style="display: none; width: 100%; padding: 10px; background: var(--ws-export-input-bg); border: 1px solid #5F3DC4; border-radius: 6px; color: #5F3DC4; cursor: pointer; font-size: 13px;">Export Since Last</button>
       </div>
       
-      <div id="ws-export-status" style="margin-top: 12px; color: #F5F4F4; font-size: 13px; text-align: center; min-height: 20px;"></div>
+      <div id="ws-export-status" style="margin-top: 12px; color: var(--ws-export-text); font-size: 13px; text-align: center; min-height: 20px;"></div>
     </div>
   `;
 
-  const overlay = document.createElement('div');
+  overlay = document.createElement('div');
   overlay.id = 'ws-panel-overlay';
   overlay.setAttribute(
     'style',
@@ -236,10 +461,10 @@ function injectExportUI(accountId: string): boolean {
 
   document.body.appendChild(overlay);
   document.body.appendChild(panel);
-  
+
   // Setup event handlers
   setupExportPanel(accountId);
-  
+
   exportUIInjected = true;
   contentAccountId = accountId;
   console.log('[Content] Export UI injected successfully');
@@ -261,13 +486,13 @@ function setupExportPanel(accountId: string) {
   const lastExportInfo = document.getElementById('ws-last-export-info');
   const exportStatus = document.getElementById('ws-export-status');
   let exportSinceLastRequested = false;
-  
+
   // Load last export info
   getContentLastExportInfo(accountId).then(info => {
     if (info && lastExportInfo && exportSinceLastBtn) {
       const exportDate = new Date(info.date);
-      const formattedDate = exportDate.toLocaleDateString('en-US', { 
-        month: 'short', 
+      const formattedDate = exportDate.toLocaleDateString('en-US', {
+        month: 'short',
         day: 'numeric',
         year: 'numeric'
       });
@@ -276,7 +501,7 @@ function setupExportPanel(accountId: string) {
       exportSinceLastBtn.style.display = 'block';
     }
   });
-  
+
   // Toggle panel
   const showPanel = () => {
     if (panel && overlay) {
@@ -284,22 +509,22 @@ function setupExportPanel(accountId: string) {
       overlay.style.display = 'block';
     }
   };
-  
+
   const hidePanel = () => {
     if (panel && overlay) {
       panel.style.display = 'none';
       overlay.style.display = 'none';
     }
   };
-  
+
   toggleBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     showPanel();
   });
-  
+
   closeBtn?.addEventListener('click', hidePanel);
   overlay?.addEventListener('click', hidePanel);
-  
+
   // Range buttons
   document.querySelectorAll('.ws-range-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -307,25 +532,25 @@ function setupExportPanel(accountId: string) {
       const range = getContentDateRange(days);
       if (startDateInput) startDateInput.value = range.startDate;
       if (endDateInput) endDateInput.value = range.endDate;
-      
+
       // Update active state
       document.querySelectorAll('.ws-range-btn').forEach(b => {
-        (b as HTMLElement).style.background = '#2a2a2a';
-        (b as HTMLElement).style.borderColor = '#444';
+        (b as HTMLElement).style.background = 'var(--ws-export-secondary-btn)';
+        (b as HTMLElement).style.borderColor = 'var(--ws-export-input-border)';
       });
       (btn as HTMLElement).style.background = '#5F3DC4';
       (btn as HTMLElement).style.borderColor = '#5F3DC4';
     });
   });
-  
+
   // Export button
   exportBtn?.addEventListener('click', async () => {
     if (!startDateInput || !endDateInput || !exportStatus) return;
-    
+
     exportBtn.textContent = 'Exporting...';
     exportBtn.setAttribute('disabled', 'true');
     exportStatus.textContent = '';
-    
+
     try {
       const lastExport = await getContentLastExportInfo(accountId);
       const response = await chrome.runtime.sendMessage({
@@ -336,11 +561,11 @@ function setupExportPanel(accountId: string) {
         lastTransactionId: exportSinceLastRequested ? lastExport?.lastTransactionId || null : null,
       });
       exportSinceLastRequested = false;
-      
+
       if (response && response.success) {
         exportStatus.textContent = '✓ Export complete!';
         exportStatus.style.color = '#4ade80';
-        
+
         // Save export info
         await saveContentExportInfo(
           accountId,
@@ -348,13 +573,13 @@ function setupExportPanel(accountId: string) {
           response.transactionCount || 0,
           response.lastTransactionId
         );
-        
+
         // Update last export display
         const info = await getContentLastExportInfo(accountId);
         if (info && lastExportInfo && exportSinceLastBtn) {
           const exportDate = new Date(info.date);
-          const formattedDate = exportDate.toLocaleDateString('en-US', { 
-            month: 'short', 
+          const formattedDate = exportDate.toLocaleDateString('en-US', {
+            month: 'short',
             day: 'numeric',
             year: 'numeric'
           });
@@ -362,7 +587,7 @@ function setupExportPanel(accountId: string) {
           lastExportInfo.style.display = 'block';
           exportSinceLastBtn.style.display = 'block';
         }
-        
+
         setTimeout(() => {
           hidePanel();
           exportBtn.textContent = 'Export Transactions';
@@ -383,7 +608,7 @@ function setupExportPanel(accountId: string) {
       exportBtn.removeAttribute('disabled');
     }
   });
-  
+
   // Export since last
   exportSinceLastBtn?.addEventListener('click', async () => {
     if (!startDateInput || !endDateInput) return;
@@ -407,8 +632,8 @@ function setupExportPanel(accountId: string) {
     }
 
     document.querySelectorAll('.ws-range-btn').forEach((btn) => {
-      (btn as HTMLElement).style.background = '#2a2a2a';
-      (btn as HTMLElement).style.borderColor = '#444';
+      (btn as HTMLElement).style.background = 'var(--ws-export-secondary-btn)';
+      (btn as HTMLElement).style.borderColor = 'var(--ws-export-input-border)';
     });
 
     exportBtn?.click();
@@ -424,7 +649,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse(accountInfo);
     return true;
   }
-  
+
   return false;
 });
 
@@ -439,21 +664,25 @@ function tryInjectUI() {
         oldButton.remove();
       }
       exportUIInjected = false;
-      const oldPanel = document.getElementById('ws-export-panel');
-      const oldOverlay = document.getElementById('ws-panel-overlay');
-      oldPanel?.remove();
-      oldOverlay?.remove();
-      
-      // Wait longer for the page to fully load and retry if needed
-      const attemptInject = (retries = 0) => {
+
+      // Poll for the container
+      const maxRetries = 50;
+      const pollInterval = 100;
+      let retries = 0;
+
+      const attemptInject = () => {
         const success = injectExportUI(accountInfo.accountId!);
-        if (!success && retries < 5) {
-          console.log('[Content] Injection failed, retrying in 1s...', retries + 1);
-          setTimeout(() => attemptInject(retries + 1), 1000);
+        if (success) return;
+
+        if (retries < maxRetries) {
+          retries++;
+          setTimeout(attemptInject, pollInterval);
+        } else {
+          console.log('[Content] Injection failed after max retries');
         }
       };
-      
-      setTimeout(() => attemptInject(), 2000);
+
+      attemptInject();
     }
   }
 }
@@ -473,10 +702,10 @@ const observer = new MutationObserver(() => {
     lastUrl = currentUrl;
     console.log('[Content] URL changed, updating account info');
     const accountInfo = extractAccountInfo();
-    
+
     // Try to inject UI on new page
     tryInjectUI();
-    
+
     // Notify background/popup of account change
     chrome.runtime.sendMessage({
       type: 'ACCOUNT_PAGE_CHANGED',
@@ -484,9 +713,17 @@ const observer = new MutationObserver(() => {
     }).catch(() => {
       // Popup might not be open, that's okay
     });
+  } else {
+    // Even if URL hasn't changed, DOM might have loaded the sidebar later
+    // Check if we need to inject
+    tryInjectUI();
   }
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
 
 console.log('[Content] Wealthsimple Exporter content script loaded');
+
+// Initialize theme
+updateTheme();
+observeThemeChanges();

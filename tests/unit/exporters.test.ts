@@ -194,7 +194,7 @@ describe('generateCSV', () => {
     it('should handle very small negative amounts', () => {
       const transaction = { ...mockTransaction, amount: -0.01 };
       const csv = generateCSV([transaction]);
-      expect(csv).toContain('-0.01');
+      expect(csv).toContain('0.01,');
     });
 
     it('should handle description with multiple special characters', () => {

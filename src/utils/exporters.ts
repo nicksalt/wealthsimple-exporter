@@ -24,9 +24,80 @@ function escapeCSVField(field: string): string {
 
 /**
  * Generate CSV string from normalized transactions
- * Headers: Date,Payee,Memo,Outflow,Inflow (YNAB outflow/inflow format)
+ * automatically selecting the best format based on data content.
  */
 export function generateCSV(transactions: NormalizedTransaction[]): string {
+
+  // Check if we have trading data (symbols, quantities)
+  // or if explicit actions are trading-related
+  // Tightened logic: 'Interest' and 'Dividend' happen in Cash accounts too, so don't trigger trading CSV just for those.
+  // Only trigger if we have a symbol (that isn't a currency) OR a specific trading action like Buy/Sell.
+  const hasTradingData = transactions.some(
+    (t) =>
+      (!!t.symbol && t.symbol !== 'CAD' && t.symbol !== 'USD') ||
+      (!!t.quantity && t.quantity > 0) ||
+      (t.action && ['Buy', 'Sell'].includes(t.action))
+  );
+
+  if (hasTradingData) {
+    return generateTradingCSV(transactions);
+  } else {
+    return generateBudgetingCSV(transactions);
+  }
+}
+
+/**
+ * Format: Date,Action,Symbol,Description,Quantity,Price,Amount,Currency,Exchange Rate
+ */
+function generateTradingCSV(transactions: NormalizedTransaction[]): string {
+  const headers = [
+    'Date',
+    'Action',
+    'Symbol',
+    'Description',
+    'Quantity',
+    'Price',
+    'Amount',
+    'Currency',
+    'Exchange Rate',
+  ];
+  const headerRow = headers.join(',');
+
+  const rows = transactions.map((t) => {
+    // For specialized actions like Deposits/Withdrawals, we might want to clear Symbol/Quantity
+    // to match the "standard" feel, or keep them if they exist.
+    // The requirement: "For Deposits/Withdrawals: Symbol/Quantity/Price will be empty."
+    const isTransfer =
+      t.action === 'Deposit' || t.action === 'Withdrawal' || t.action === 'Transfer';
+
+    const symbol = isTransfer ? '' : t.symbol || '';
+    const quantity = isTransfer ? '' : t.quantity?.toString() || '';
+    const price = isTransfer ? '' : t.price?.toFixed(4) || '';
+
+    // Amount is already signed correctly from transactionService
+    const amount = t.amount.toFixed(2);
+
+    const fields = [
+      t.date,
+      escapeCSVField(t.action || t.category),
+      escapeCSVField(symbol),
+      escapeCSVField(t.description),
+      quantity,
+      price,
+      amount,
+      t.currency,
+      '', // Exchange Rate (not currently available in standard API data, placeholder)
+    ];
+    return fields.join(',');
+  });
+
+  return [headerRow, ...rows].join('\n');
+}
+
+/**
+ * Format: Date,Payee,Memo,Outflow,Inflow
+ */
+function generateBudgetingCSV(transactions: NormalizedTransaction[]): string {
   const headers = ['Date', 'Payee', 'Memo', 'Outflow', 'Inflow'];
   const headerRow = headers.join(',');
 
@@ -39,15 +110,6 @@ export function generateCSV(transactions: NormalizedTransaction[]): string {
 
     const outflow = t.amount < 0 ? Math.abs(t.amount).toFixed(2) : '';
     const inflow = t.amount >= 0 ? t.amount.toFixed(2) : '';
-
-    // Debug logging for amount split
-    if (outflow === '' && inflow === '') {
-      console.log('[generateCSV] WARNING: Both outflow and inflow empty!', {
-        amount: t.amount,
-        description: t.description,
-        amountLessThanZero: t.amount < 0,
-      });
-    }
 
     const fields = [
       t.date,

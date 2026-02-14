@@ -100,12 +100,20 @@ export async function fetchAccounts(token: string): Promise<Account[]> {
 export async function fetchTransactions(
   accountId: string,
   token: string,
+  accountMap: Map<string, string>,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountType?: string
 ): Promise<NormalizedTransaction[]> {
   const allActivities: Activity[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
+
+  // Check both explicit type and accountId string primarily because sometimes type isn't passed correctly
+  const isCreditCard =
+    accountType === 'credit_card' ||
+    accountType === 'credit-card' ||
+    accountId.includes('credit-card');
 
   const effectiveEndDate = endDate ?? new Date().toISOString();
 
@@ -155,14 +163,14 @@ export async function fetchTransactions(
   }
 
   // Normalize all activities to transactions
-  return allActivities.map(normalizeTransaction);
+  return allActivities.map((a) => normalizeTransaction(a, accountMap, isCreditCard));
 }
 
 /**
  * Resolve the signed amount from an activity
  * CRITICAL: Handles DEBIT (negative) vs CREDIT (positive) sign logic
  */
-function resolveAmount(activity: Activity): number {
+function resolveAmount(activity: Activity, isCreditCard: boolean = false): number {
   const rawAmount = activity.amount != null ? parseFloat(activity.amount) : 0;
 
   // Handle NaN from malformed strings
@@ -172,16 +180,60 @@ function resolveAmount(activity: Activity): number {
 
   if (activity.amountSign === 'DEBIT') {
     const debit = -Math.abs(rawAmount);
-    // Normalize -0 to 0
     return debit === 0 ? 0 : debit;
   }
   if (activity.amountSign === 'CREDIT') {
     return Math.abs(rawAmount);
   }
 
-  // null amountSign: keep as-is
-  // Debug: log when amountSign is missing
-  console.log('[resolveAmount] WARNING: null amountSign for activity:', {
+  // Fallback: use type-based logic if limits/sign missing
+  const type = (activity.type || '').toUpperCase();
+  const subType = (activity.subType || '').toUpperCase();
+
+  // Outflows
+  if (
+    ['DIY_BUY', 'MANAGED_BUY', 'CRYPTO_BUY', 'WITHDRAWAL', 'FEE', 'NON_RESIDENT_TAX', 'TAX'].includes(type) ||
+    (type === 'CREDIT_CARD' && subType === 'PURCHASE')
+  ) {
+    return -Math.abs(rawAmount);
+  }
+
+  // Inflows
+  if (
+    ['DIY_SELL', 'MANAGED_SELL', 'CRYPTO_SELL', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'REIMBURSEMENT', 'REFUND', 'PROMOTION', 'REFERRAL'].includes(type)
+  ) {
+    return Math.abs(rawAmount);
+  }
+
+  // Credit Card Payments
+  // If we are in a Credit Card account, a payment is an INFLOW (reduces debt) -> Positive
+  // If we are in a Cash/Spending account, a payment is an OUTFLOW (spending money) -> Negative
+  if (type === 'CREDIT_CARD_PAYMENT' || (type === 'CREDIT_CARD' && (subType === 'PAYMENT' || subType === 'REFUND'))) {
+    if (isCreditCard) {
+      return Math.abs(rawAmount);
+    } else {
+      return -Math.abs(rawAmount);
+    }
+  }
+
+  // Internal Transfers & Asset Movements
+  if (type === 'INTERNAL_TRANSFER' || type === 'ASSET_MOVEMENT') {
+    if (subType === 'SOURCE') {
+      return -Math.abs(rawAmount);
+    }
+    // Destination or other side of transfer
+    return Math.abs(rawAmount);
+  }
+
+  // P2P Payments
+  if (type === 'P2P_PAYMENT') {
+    if (subType === 'SEND') {
+      return -Math.abs(rawAmount);
+    }
+    return Math.abs(rawAmount);
+  }
+
+  console.log('[resolveAmount] WARNING: ambiguous amount for activity:', {
     type: activity.type,
     subType: activity.subType,
     rawAmount,
@@ -190,10 +242,29 @@ function resolveAmount(activity: Activity): number {
 }
 
 /**
+ * Derive a simplified action for trading CSVs
+ */
+function deriveAction(a: Activity): string {
+  const type = a.type;
+
+  if (type.includes('BUY')) return 'Buy';
+  if (type.includes('SELL')) return 'Sell';
+  if (type === 'DIVIDEND') return 'Dividend';
+  if (type === 'DEPOSIT') return 'Deposit';
+  if (type === 'WITHDRAWAL') return 'Withdrawal';
+  if (type === 'FEE') return 'Fee';
+  if (type === 'INTEREST') return 'Interest';
+  if (type === 'INTERNAL_TRANSFER') return 'Transfer';
+  if (type === 'FUNDS_CONVERSION') return 'Conversion';
+
+  return deriveCategory(a);
+}
+
+/**
  * Generate a human-readable description from an activity
  * Ported from python-reference/ws_api/formatters.py
  */
-function generateDescription(a: Activity): string {
+function generateDescription(a: Activity, accountMap?: Map<string, string>): string {
   const type = a.type;
   const subType = a.subType;
 
@@ -228,19 +299,22 @@ function generateDescription(a: Activity): string {
     }
     if (subType === 'PAYMENT_CARD_TRANSACTION') return `${dir}: Debit card funding`;
 
+    // Clean up if merchant is available (e.g. for simple deposits/withdrawals that have a merchant)
+    if (a.spendMerchant) return a.spendMerchant;
+
     return dir;
   }
 
   // Credit card
   if (type === 'CREDIT_CARD') {
     if (subType === 'PURCHASE') {
-      return `Credit card purchase: ${a.spendMerchant ?? 'Unknown'}`;
+      return a.spendMerchant ?? 'Credit card purchase';
     }
     if (subType === 'HOLD') {
-      return `Credit card hold: ${a.spendMerchant ?? 'Unknown'}`;
+      return a.spendMerchant ? `${a.spendMerchant} (Hold)` : 'Credit card hold';
     }
     if (subType === 'REFUND') {
-      return `Credit card refund: ${a.spendMerchant ?? 'Unknown'}`;
+      return a.spendMerchant ? `${a.spendMerchant} (Refund)` : 'Refund';
     }
     if (subType === 'PAYMENT') return 'Credit card payment';
   }
@@ -250,8 +324,14 @@ function generateDescription(a: Activity): string {
   // Internal transfers
   if (type === 'INTERNAL_TRANSFER' || type === 'ASSET_MOVEMENT') {
     const dir = subType === 'SOURCE' ? 'Transfer out' : 'Transfer in';
-    const accountRef = a.opposingAccountId ?? 'unknown';
-    return `${dir} (${accountRef})`;
+    // Use mapped nickname if available
+    const accountRef = (a.opposingAccountId && accountMap?.get(a.opposingAccountId))
+      ? accountMap.get(a.opposingAccountId)
+      : (a.opposingAccountId ?? 'unknown');
+
+    // If it's a transfer, we can just say "Transfer to X" or "Transfer from X"
+    const preposition = subType === 'SOURCE' ? 'to' : 'from';
+    return `Transfer ${preposition} ${accountRef}`;
   }
 
   // Dividend
@@ -328,14 +408,33 @@ function deriveCategory(a: Activity): string {
  * Normalize a raw activity to a transaction ready for export
  * This is a pure function exported for testing
  */
-export function normalizeTransaction(activity: Activity): NormalizedTransaction {
+export function normalizeTransaction(
+  activity: Activity,
+  accountMap?: Map<string, string>,
+  isCreditCard: boolean = false
+): NormalizedTransaction {
+  const amount = resolveAmount(activity, isCreditCard);
+  const quantity = activity.assetQuantity ? parseFloat(activity.assetQuantity) : undefined;
+
+  // Derive price if quantity exists and is valid
+  let price: number | undefined;
+  if (quantity && quantity !== 0 && activity.amount) {
+    price = Math.abs(parseFloat(activity.amount)) / quantity;
+  }
+
   return {
     id: activity.canonicalId,
     date: activity.occurredAt.split('T')[0], // Extract YYYY-MM-DD
-    description: generateDescription(activity),
-    amount: resolveAmount(activity),
+    description: generateDescription(activity, accountMap),
+    amount: amount,
     currency: activity.currency ?? 'CAD',
     category: deriveCategory(activity),
     accountId: activity.accountId,
+    // Trading fields
+    symbol: activity.assetSymbol ?? undefined,
+    action: deriveAction(activity),
+    quantity: quantity,
+    price: price,
   };
 }
+

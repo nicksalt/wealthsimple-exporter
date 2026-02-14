@@ -155,7 +155,7 @@ describe('normalizeTransaction', () => {
 
     it('should generate description for CREDIT_CARD PURCHASE', () => {
       const result = normalizeTransaction(mockCreditCardPurchase);
-      expect(result.description).toBe('Credit card purchase: Starbucks');
+      expect(result.description).toBe('Starbucks');
     });
 
     it('should generate description for CREDIT_CARD PAYMENT', () => {
@@ -169,7 +169,7 @@ describe('normalizeTransaction', () => {
 
     it('should generate description for INTERNAL_TRANSFER SOURCE', () => {
       const result = normalizeTransaction(mockInternalTransfer);
-      expect(result.description).toBe('Transfer out (account-456)');
+      expect(result.description).toBe('Transfer to account-456');
     });
 
     it('should generate description for INTERNAL_TRANSFER DESTINATION', () => {
@@ -179,7 +179,7 @@ describe('normalizeTransaction', () => {
         opposingAccountId: 'account-789',
       });
       const result = normalizeTransaction(activity);
-      expect(result.description).toBe('Transfer in (account-789)');
+      expect(result.description).toBe('Transfer from account-789');
     });
 
     it('should generate description for DIVIDEND', () => {

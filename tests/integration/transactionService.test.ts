@@ -192,7 +192,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse(mockActivities, false),
       });
 
-      const result = await fetchTransactions('account-123', mockToken);
+      const result = await fetchTransactions('account-123', mockToken, new Map());
 
       expect(result).toHaveLength(3);
       // Verify normalization happened (amount is now a number with correct sign)
@@ -209,7 +209,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse(mockActivities, false),
       });
 
-      const result = await fetchTransactions('account-123', mockToken);
+      const result = await fetchTransactions('account-123', mockToken, new Map());
 
       expect(result).toHaveLength(2);
       expect(result.find((t) => t.description.includes('rejected'))).toBeUndefined();
@@ -223,7 +223,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse(mockActivities, false),
       });
 
-      const result = await fetchTransactions('account-123', mockToken);
+      const result = await fetchTransactions('account-123', mockToken, new Map());
 
       expect(result).toHaveLength(2);
       expect(result[0].description).toContain('Buy');
@@ -244,7 +244,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse(page2, false),
       });
 
-      const result = await fetchTransactions('account-123', mockToken);
+      const result = await fetchTransactions('account-123', mockToken, new Map());
 
       expect(result).toHaveLength(2);
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -256,7 +256,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse([], false),
       });
 
-      const result = await fetchTransactions('account-123', mockToken);
+      const result = await fetchTransactions('account-123', mockToken, new Map());
 
       expect(result).toEqual([]);
     });
@@ -267,7 +267,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse([], false),
       });
 
-      await fetchTransactions('account-123', mockToken, '2024-01-01', '2024-12-31');
+      await fetchTransactions('account-123', mockToken, new Map(), '2024-01-01', '2024-12-31');
 
       const call = fetchMock.mock.calls[0];
       const body = JSON.parse(call[1].body);
@@ -286,7 +286,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse([], false),
       });
 
-      await fetchTransactions('account-123', mockToken, '2024-01-01');
+      await fetchTransactions('account-123', mockToken, new Map(), '2024-01-01');
 
       const call = fetchMock.mock.calls[0];
       const body = JSON.parse(call[1].body);
@@ -303,7 +303,7 @@ describe('Transaction Service Integration Tests', () => {
         }),
       });
 
-      await expect(fetchTransactions('invalid-account', mockToken)).rejects.toThrow(
+      await expect(fetchTransactions('invalid-account', mockToken, new Map())).rejects.toThrow(
         'GraphQL error: Invalid account ID'
       );
     });
@@ -351,7 +351,7 @@ describe('Transaction Service Integration Tests', () => {
         json: async () => wrapInActivitiesResponse(mockActivities, false),
       });
 
-      const transactions = await fetchTransactions(accounts[0].id, mockToken);
+      const transactions = await fetchTransactions(accounts[0].id, mockToken, new Map());
       expect(transactions).toHaveLength(2);
 
       // Generate CSV
@@ -359,15 +359,20 @@ describe('Transaction Service Integration Tests', () => {
       const lines = csv.split('\n');
 
       expect(lines).toHaveLength(3); // header + 2 rows
-      expect(lines[0]).toBe('Date,Description,Amount,Currency,Category,Account');
+      // Expect Trading CSV headers
+      expect(lines[0]).toBe('Date,Action,Symbol,Description,Quantity,Price,Amount,Currency,Exchange Rate');
+
+      // Line 1: Buy AAPL
       expect(lines[1]).toContain('2024-01-15');
-      expect(lines[1]).toContain('Buy 10 x AAPL');
-      expect(lines[1]).toContain('-1000.00');
-      expect(lines[1]).toContain('Investment Buy');
+      expect(lines[1]).toContain('Buy'); // Action
+      expect(lines[1]).toContain('AAPL'); // Symbol
+      expect(lines[1]).toContain('Buy 10 x AAPL'); // Description
+      expect(lines[1]).toContain('-1000.00'); // Amount
+
+      // Line 2: Dividend AAPL
       expect(lines[2]).toContain('2024-01-20');
       expect(lines[2]).toContain('Dividend: AAPL');
       expect(lines[2]).toContain('25.50');
-      expect(lines[2]).toContain('Dividend');
     });
   });
 });

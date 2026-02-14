@@ -5,8 +5,6 @@
  */
 
 import { fetchAccounts, fetchTransactions } from './transactionService';
-// ... remainder of file
-import { fetchAccounts, fetchTransactions } from './transactionService';
 import { generateCSV } from '../utils/exporters';
 
 interface AuthData {
@@ -20,7 +18,7 @@ interface AuthData {
 async function extractAuthFromCookie(): Promise<AuthData | null> {
   try {
     console.log('[Background] Attempting to extract auth cookie...');
-    
+
     const cookie = await chrome.cookies.get({
       url: 'https://my.wealthsimple.com',
       name: '_oauth2_access_v2',
@@ -32,7 +30,7 @@ async function extractAuthFromCookie(): Promise<AuthData | null> {
     }
 
     console.log('[Background] Cookie found, decoding...');
-    
+
     // Cookie value is URL-encoded JSON
     const decodedValue = decodeURIComponent(cookie.value);
     const authData = JSON.parse(decodedValue);
@@ -92,7 +90,7 @@ async function handleExportTransactions(
 ) {
   try {
     console.log('[Background] Starting export for account:', accountId);
-    
+
     // Step 1: Extract auth from cookie
     const auth = await extractAuthFromCookie();
 
@@ -103,7 +101,7 @@ async function handleExportTransactions(
     }
 
     console.log('[Background] Auth found, fetching accounts...');
-    
+
     // Step 2: Fetch accounts
     const accounts = await fetchAccounts(auth.authToken);
 
@@ -118,20 +116,20 @@ async function handleExportTransactions(
     if (accountId) {
       // Try to find account by ID
       targetAccount = accounts.find(acc => acc.id === accountId);
-      
+
       if (!targetAccount) {
         console.log(`[Background] Account ${accountId} not found, checking custodian accounts...`);
         // Sometimes the accountId might be a custodian account ID
-        targetAccount = accounts.find(acc => 
+        targetAccount = accounts.find(acc =>
           acc.custodianAccounts?.some(ca => ca.id === accountId)
         );
       }
-      
+
       if (!targetAccount) {
         console.error('[Background] Specified account not found:', accountId);
-        sendResponse({ 
-          success: false, 
-          error: `Account not found. Please make sure you're on a valid account page.` 
+        sendResponse({
+          success: false,
+          error: `Account not found. Please make sure you're on a valid account page.`
         });
         return;
       }
@@ -140,7 +138,7 @@ async function handleExportTransactions(
       targetAccount = accounts[0];
       console.log('[Background] No account ID provided, using first account');
     }
-    
+
     console.log(`[Background] Exporting transactions for account: ${targetAccount.nickname || targetAccount.id}`);
 
     let dateRange = (startDate && endDate) ? { startDate, endDate } : getLast30Days();
@@ -152,17 +150,37 @@ async function handleExportTransactions(
       console.log(`[Background] Fetching transactions from ${dateRange.startDate} to ${dateRange.endDate}...`);
     }
 
+    // Create account map for clean descriptions
+    const accountMap = new Map<string, string>();
+    accounts.forEach(acc => {
+      // Use nickname if available, otherwise format type
+      let name = acc.nickname;
+      if (!name) {
+        // Format "tfsa" -> "TFSA"
+        const type = (acc.unifiedAccountType || acc.type || '').toUpperCase().replace(/_/g, ' ');
+        name = type;
+      }
+      accountMap.set(acc.id, name);
+
+      // Also map custodian accounts
+      acc.custodianAccounts.forEach(ca => {
+        accountMap.set(ca.id, name!);
+      });
+    });
+
     const transactions = await fetchTransactions(
       targetAccount.id,
       auth.authToken,
+      accountMap,
       useLastTransactionId ? undefined : dateRange.startDate,
-      useLastTransactionId ? undefined : dateRange.endDate
+      useLastTransactionId ? undefined : dateRange.endDate,
+      targetAccount.unifiedAccountType || targetAccount.type
     );
 
     let exportTransactions = transactions;
     if (useLastTransactionId) {
       const lastIndex = transactions.findIndex((t) => t.id === lastTransactionId);
-      
+
       if (lastIndex >= 0) {
         // Transactions are DESC ordered (newest first)
         // If we found it at index 5, indices 0-4 are newer, 6+ are older
@@ -174,7 +192,7 @@ async function handleExportTransactions(
         // Return all transactions (user will get some duplicates, but this is safer than losing data)
         console.log(`[Background] WARNING: lastTransactionId not found in current batch. Returning all transactions. User may see some duplicates.`);
       }
-      
+
       dateRange = {
         startDate: exportTransactions[exportTransactions.length - 1]?.date ?? new Date().toISOString().split('T')[0],
         endDate: new Date().toISOString().split('T')[0],
@@ -183,8 +201,8 @@ async function handleExportTransactions(
 
     if (!exportTransactions || exportTransactions.length === 0) {
       console.log('[Background] No transactions found');
-      sendResponse({ 
-        success: false, 
+      sendResponse({
+        success: false,
         error: useLastTransactionId
           ? `No new transactions found for ${targetAccount.nickname || 'this account'} since your last export.`
           : `No transactions found for ${targetAccount.nickname || 'this account'} in the specified date range.`
@@ -203,24 +221,24 @@ async function handleExportTransactions(
     const accountName = targetAccount.nickname || targetAccount.id;
     const safeAccountName = accountName.replace(/[^a-zA-Z0-9-_]/g, '-');
     const filename = `wealthsimple-${safeAccountName}-${dateRange.endDate}.csv`;
-    
+
     console.log(`[Background] Attempting download of ${filename}...`);
-    
+
     try {
       // Use data URL (works in service workers, unlike blob URLs)
       const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
-      
+
       console.log(`[Background] Data URL created, CSV length: ${csvContent.length} characters`);
-      
+
       const downloadId = await chrome.downloads.download({
         url: dataUrl,
         filename: filename,
         saveAs: false, // Auto-download to Downloads folder
         conflictAction: 'uniquify',
       });
-      
+
       console.log(`[Background] Download initiated with ID: ${downloadId}`);
-      
+
       // Monitor download completion
       const checkDownload = (delta: chrome.downloads.DownloadDelta) => {
         if (delta.id === downloadId) {
@@ -233,14 +251,14 @@ async function handleExportTransactions(
           }
         }
       };
-      
+
       chrome.downloads.onChanged.addListener(checkDownload);
-      
+
       const lastExportedTransactionId =
         exportTransactions[exportTransactions.length - 1]?.id ?? null;
 
-      sendResponse({ 
-        success: true, 
+      sendResponse({
+        success: true,
         message: `Successfully exported ${exportTransactions.length} transactions from ${accountName}! Check your Downloads folder.`,
         transactionCount: exportTransactions.length,
         lastTransactionId: lastExportedTransactionId,
@@ -254,9 +272,9 @@ async function handleExportTransactions(
     }
   } catch (error) {
     console.error('[Background] Export failed:', error);
-    sendResponse({ 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error occurred' 
+    sendResponse({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
     });
   }
 }
@@ -266,7 +284,7 @@ async function handleExportTransactions(
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[Background] Received message:', message.type);
-  
+
   if (message.type === 'EXPORT_TRANSACTIONS') {
     const accountId = message.accountId || null;
     const startDate = message.startDate || null;
