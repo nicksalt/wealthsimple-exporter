@@ -1,0 +1,19 @@
+node_modules
+dist
+.DS_Store
+*.log
+.env
+.vscode
+.idea
+build
+.env*
+# Test artifacts
+tests-results
+screenshot.png
+
+# Session/Keyring data if added
+.python-session.json
+.playwright-mcp/**
+# Sensitive financial data
+*.csv
+*.png

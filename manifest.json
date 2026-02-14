@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Wealthsimple Exporter",
+  "version": "0.1.0",
+  "description": "Export your Wealthsimple transactions directly from the browser.",
+  "permissions": ["storage", "activeTab", "cookies", "downloads", "webNavigation"],
+  "host_permissions": ["https://*.wealthsimple.com/*"],
+  "action": {
+    "default_popup": "src/popup/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://my.wealthsimple.com/*"],
+      "js": ["src/content/index.ts"]
+    }
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  }
+}

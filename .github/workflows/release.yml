@@ -1,0 +1,40 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run Tests
+        run: npm test
+        
+      - name: Build Extension
+        run: npm run build
+        
+      - name: Zip Build
+        if: startsWith(github.ref, 'refs/tags/')
+        run: zip -r wealthsimple-exporter-${{ github.ref_name }}.zip dist
+        
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wealthsimple-exporter-${{ github.ref_name }}.zip
+          generate_release_notes: true

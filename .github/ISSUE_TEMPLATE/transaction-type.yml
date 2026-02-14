@@ -1,0 +1,34 @@
+name: New Transaction Type
+description: Help us support a transaction type that isn't formatting correctly.
+labels: ["enhancement", "transaction-mapping"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the exporter! Please provide the details of the transaction that isn't looking right.
+  - type: input
+    id: transaction_type
+    attributes:
+      label: Transaction Type / Subtype
+      placeholder: e.g., DIY_BUY / DIVIDEND
+    validations:
+      required: true
+  - type: textarea
+    id: raw_json
+    attributes:
+      label: Redacted JSON Structure
+      description: Please copy the raw JSON from the 'Network' tab in DevTools, but REDACT any private info (Account IDs, Names, precise Amounts).
+      placeholder: |
+        {
+          "type": "...",
+          "subType": "...",
+          "description": "..."
+        }
+    validations:
+      required: true
+  - type: textarea
+    id: expected_output
+    attributes:
+      label: Expected Description
+      description: How should this appear in your CSV?
+      placeholder: e.g. "Dividend: XEQT"
