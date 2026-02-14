@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateCSV } from '../../src/utils/exporters';
+import {
+  generateCSV,
+  generateOFX,
+  generateQFX,
+  generateExportFile,
+} from '../../src/utils/exporters';
+import { generateFitId } from '../../src/utils/exporters/ofx';
 import type { NormalizedTransaction } from '../../src/utils/types';
 
 describe('generateCSV', () => {
@@ -205,5 +211,104 @@ describe('generateCSV', () => {
       const csv = generateCSV([transaction]);
       expect(csv).toContain('"Transfer: ""Special, Account""\nWith newline"');
     });
+  });
+});
+
+describe('OFX/QFX exporters', () => {
+  const transaction: NormalizedTransaction = {
+    id: 'txn-100',
+    date: '2024-01-15',
+    description: 'Deposit: Payroll',
+    amount: 1500,
+    currency: 'CAD',
+    category: 'Deposit',
+    accountId: 'cash-123',
+  };
+
+  it('should generate OFX with required SGML headers', () => {
+    const ofx = generateOFX([transaction], { accountId: 'cash-123' });
+    expect(ofx).toContain('DATA:OFXSGML');
+    expect(ofx).toContain('VERSION:102');
+    expect(ofx).toContain('<OFX>');
+    expect(ofx).toContain('<FITID>txn-100');
+  });
+
+  it('should map transaction categories to TRNTYPE', () => {
+    const withdrawal = { ...transaction, id: 'txn-101', amount: -20, category: 'Withdrawal' };
+    const transferOut = { ...transaction, id: 'txn-102', amount: -100, category: 'Transfer' };
+    const transferIn = { ...transaction, id: 'txn-103', amount: 100, category: 'Transfer' };
+
+    const ofx = generateOFX([transaction, withdrawal, transferOut, transferIn], { accountId: 'cash-123' });
+    expect(ofx).toContain('<TRNTYPE>DEP');
+    expect(ofx).toContain('<TRNTYPE>WITHDRAWAL');
+    expect(ofx).toContain('<TRNTYPE>DEBIT');
+    expect(ofx).toContain('<TRNTYPE>CREDIT');
+  });
+
+  it('should generate deterministic and account-safe FITID for internal transfers', () => {
+    const sourceTransfer = {
+      ...transaction,
+      id: 'transfer-1',
+      category: 'Transfer',
+      description: 'Transfer to savings',
+      amount: -500,
+      accountId: 'account-source',
+    };
+    const destinationTransfer = {
+      ...sourceTransfer,
+      amount: 500,
+      accountId: 'account-destination',
+      description: 'Transfer from chequing',
+    };
+
+    const sourceFitIdA = generateFitId(sourceTransfer);
+    const sourceFitIdB = generateFitId(sourceTransfer);
+    const destinationFitId = generateFitId(destinationTransfer);
+
+    expect(sourceFitIdA).toBe(sourceFitIdB);
+    expect(sourceFitIdA).not.toBe(destinationFitId);
+    expect(sourceFitIdA).toMatch(/^transfer-1-/);
+  });
+
+  it('should generate QFX with Quicken-compatible FI block', () => {
+    const qfx = generateQFX([transaction], { accountId: 'cash-123', fid: '2000' });
+    expect(qfx).toContain('<INTU.BID>2000');
+    expect(qfx).toContain('<FID>2000');
+  });
+
+  it('should normalize OFX name field using CSV payee rules', () => {
+    const normalized: NormalizedTransaction = {
+      ...transaction,
+      description: 'Deposit: AFT Payroll Inc',
+    };
+
+    const ofx = generateOFX([normalized], { accountId: 'cash-123' });
+    expect(ofx).toContain('<NAME>Payroll Inc');
+    expect(ofx).not.toContain('<NAME>Deposit: AFT Payroll Inc');
+  });
+
+  it('should normalize QFX name field using CSV payee rules', () => {
+    const normalized: NormalizedTransaction = {
+      ...transaction,
+      description: 'Withdrawal: EFT Utility Co',
+      amount: -80,
+      category: 'Withdrawal',
+    };
+
+    const qfx = generateQFX([normalized], { accountId: 'cash-123' });
+    expect(qfx).toContain('<NAME>Utility Co');
+    expect(qfx).not.toContain('<NAME>Withdrawal: EFT Utility Co');
+  });
+
+  it('should dispatch export content and extension by format', () => {
+    const csv = generateExportFile([transaction], 'csv', { accountId: 'cash-123' });
+    const ofx = generateExportFile([transaction], 'ofx', { accountId: 'cash-123' });
+    const qfx = generateExportFile([transaction], 'qfx', { accountId: 'cash-123' });
+
+    expect(csv.extension).toBe('csv');
+    expect(ofx.extension).toBe('ofx');
+    expect(qfx.extension).toBe('qfx');
+    expect(ofx.content).toContain('<OFX>');
+    expect(qfx.content).toContain('<INTU.BID>');
   });
 });

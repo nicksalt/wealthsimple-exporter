@@ -1,4 +1,4 @@
-// Popup UI logic for Wealthsimple Exporter
+import type { ExportFormat } from '../utils/exporters';
 
 let statusDiv: HTMLDivElement | null = null;
 let exportBtn: HTMLButtonElement | null = null;
@@ -6,52 +6,76 @@ let exportSinceLastBtn: HTMLButtonElement | null = null;
 let startDateInput: HTMLInputElement | null = null;
 let endDateInput: HTMLInputElement | null = null;
 let dateRangeSection: HTMLDivElement | null = null;
+let formatSection: HTMLDivElement | null = null;
+let formatSelect: HTMLSelectElement | null = null;
 let lastExportInfo: HTMLDivElement | null = null;
 let currentAccountId: string | null = null;
 
-/**
- * Update status message with styling
- */
+const EXPORT_FORMAT_KEY = 'preferredExportFormat';
+
+interface LastExportInfo {
+  date: string;
+  count: number;
+  lastTransactionId?: string;
+}
+
 function updateStatus(message: string, type: 'info' | 'error' | 'success' = 'info') {
-  console.log(`[Popup] Status: ${message} (${type})`);
   if (statusDiv) {
     statusDiv.textContent = message;
     statusDiv.className = type;
   }
 }
 
-/**
- * Get date range (defaults to last 30 days)
- */
 function getDefaultDateRange(days: number = 30): { startDate: string; endDate: string } {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
-  
+
   return {
     startDate: start.toISOString().split('T')[0],
     endDate: end.toISOString().split('T')[0],
   };
 }
 
-/**
- * Set date range in inputs
- */
 function setDateRange(days: number) {
   const { startDate, endDate } = getDefaultDateRange(days);
   if (startDateInput) startDateInput.value = startDate;
   if (endDateInput) endDateInput.value = endDate;
-  
-  // Update active button
-  document.querySelectorAll('.quick-range button').forEach(btn => btn.classList.remove('active'));
-  const activeBtn = document.getElementById(`range${days}d`) || document.getElementById(`range${days === 365 ? '1y' : days + 'd'}`);
+
+  document.querySelectorAll('.quick-range button').forEach((btn) => btn.classList.remove('active'));
+  const activeBtn = document.getElementById(`range${days}d`) || document.getElementById(`range${days === 365 ? '1y' : `${days}d`}`);
   if (activeBtn) activeBtn.classList.add('active');
 }
 
-/**
- * Get last export info for account
- */
-async function getLastExportInfo(accountId: string): Promise<{ date: string; count: number } | null> {
+function getSelectedFormat(): ExportFormat {
+  const value = formatSelect?.value;
+  if (value === 'ofx' || value === 'qfx') return value;
+  return 'csv';
+}
+
+async function getPreferredFormat(): Promise<ExportFormat> {
+  try {
+    const result = await chrome.storage.local.get([EXPORT_FORMAT_KEY]);
+    const value = result[EXPORT_FORMAT_KEY];
+    if (value === 'ofx' || value === 'qfx' || value === 'csv') {
+      return value;
+    }
+  } catch (error) {
+    console.error('[Popup] Failed to load preferred format:', error);
+  }
+
+  return 'csv';
+}
+
+async function savePreferredFormat(format: ExportFormat) {
+  try {
+    await chrome.storage.local.set({ [EXPORT_FORMAT_KEY]: format });
+  } catch (error) {
+    console.error('[Popup] Failed to save preferred format:', error);
+  }
+}
+
+async function getLastExportInfo(accountId: string): Promise<LastExportInfo | null> {
   try {
     const key = `lastExport_${accountId}`;
     const result = await chrome.storage.local.get([key]);
@@ -62,29 +86,28 @@ async function getLastExportInfo(accountId: string): Promise<{ date: string; cou
   }
 }
 
-/**
- * Save export info for account
- */
-async function saveExportInfo(accountId: string, date: string, count: number) {
+async function saveExportInfo(
+  accountId: string,
+  date: string,
+  count: number,
+  lastTransactionId: string | null
+) {
   try {
     const key = `lastExport_${accountId}`;
-    await chrome.storage.local.set({ [key]: { date, count } });
+    await chrome.storage.local.set({ [key]: { date, count, lastTransactionId: lastTransactionId || undefined } });
   } catch (error) {
     console.error('[Popup] Failed to save export info:', error);
   }
 }
 
-/**
- * Update last export info display
- */
 async function updateLastExportInfo(accountId: string) {
   const info = await getLastExportInfo(accountId);
   if (info && lastExportInfo && exportSinceLastBtn) {
     const exportDate = new Date(info.date);
-    const formattedDate = exportDate.toLocaleDateString('en-US', { 
-      month: 'short', 
+    const formattedDate = exportDate.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
     });
     lastExportInfo.textContent = `Last export: ${formattedDate} (${info.count} transactions)`;
     lastExportInfo.style.display = 'block';
@@ -95,13 +118,9 @@ async function updateLastExportInfo(accountId: string) {
   }
 }
 
-/**
- * Check if user is authenticated
- */
 async function checkAuth(): Promise<boolean> {
   try {
     const result = await chrome.storage.local.get(['authToken']);
-    console.log('[Popup] Auth check result:', !!result.authToken);
     return !!result.authToken;
   } catch (error) {
     console.error('[Popup] Failed to check auth:', error);
@@ -109,35 +128,26 @@ async function checkAuth(): Promise<boolean> {
   }
 }
 
-/**
- * Get current account info from the active tab
- */
 async function getCurrentAccountInfo(): Promise<{ accountId: string | null; accountName: string | null; isAccountPage: boolean }> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log('[Popup] Current tab:', { id: tab.id, url: tab.url });
-    
+
     if (!tab.id || !tab.url?.includes('wealthsimple.com')) {
-      console.log('[Popup] Not on Wealthsimple page');
       return { accountId: null, accountName: null, isAccountPage: false };
     }
-    
-    console.log('[Popup] Sending GET_ACCOUNT_INFO message to tab:', tab.id);
+
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_ACCOUNT_INFO' });
-    console.log('[Popup] Account info from content script:', response);
     return response;
   } catch (error) {
-    console.error('[Popup] Failed to get account info (content script may not be loaded):', error);
-    // Fallback: try to parse the URL ourselves
+    console.error('[Popup] Failed to get account info:', error);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab.url) {
       const match = tab.url.match(/\/app\/account-details\/([a-zA-Z0-9-_]+)/);
       if (match) {
-        console.log('[Popup] Fallback: Detected account ID from URL:', match[1]);
-        return { 
-          accountId: match[1], 
-          accountName: match[1].split('-')[0]?.toUpperCase() || null, 
-          isAccountPage: true 
+        return {
+          accountId: match[1],
+          accountName: match[1].split('-')[0]?.toUpperCase() || null,
+          isAccountPage: true,
         };
       }
     }
@@ -145,107 +155,90 @@ async function getCurrentAccountInfo(): Promise<{ accountId: string | null; acco
   }
 }
 
-/**
- * Handle export button click
- */
 async function handleExport(sinceLast: boolean = false) {
   if (!exportBtn || !currentAccountId) return;
-  
+
   const startDate = startDateInput?.value || '';
   const endDate = endDateInput?.value || '';
-  
-  console.log('[Popup] Export button clicked for account:', currentAccountId, 'Range:', startDate, 'to', endDate);
-  
-  // Disable buttons during export
+  const format = getSelectedFormat();
+  const lastExport = sinceLast ? await getLastExportInfo(currentAccountId) : null;
+
   exportBtn.disabled = true;
   if (exportSinceLastBtn) exportSinceLastBtn.disabled = true;
-  updateStatus('Exporting transactions...', 'info');
+  updateStatus(`Exporting ${format.toUpperCase()}...`, 'info');
 
   try {
-    console.log('[Popup] Sending EXPORT_TRANSACTIONS message...');
-    const response = await chrome.runtime.sendMessage({ 
+    const response = await chrome.runtime.sendMessage({
       type: 'EXPORT_TRANSACTIONS',
       accountId: currentAccountId,
       startDate,
-      endDate
+      endDate,
+      format,
+      lastTransactionId: sinceLast ? lastExport?.lastTransactionId || null : null,
     });
-    console.log('[Popup] Response received:', response);
 
     if (response && response.success) {
       updateStatus(response.message || 'Export complete!', 'success');
-      
-      // Save export info
-      await saveExportInfo(currentAccountId, endDate, response.transactionCount || 0);
+
+      await saveExportInfo(currentAccountId, endDate, response.transactionCount || 0, response.lastTransactionId || null);
       await updateLastExportInfo(currentAccountId);
-      
-      // Re-enable buttons after 3 seconds
+
       setTimeout(() => {
         if (exportBtn) exportBtn.disabled = false;
         if (exportSinceLastBtn) exportSinceLastBtn.disabled = false;
         updateStatus('Ready to export transactions', 'success');
-      }, 3000);
+      }, 2000);
     } else {
       updateStatus(response?.error || 'Export failed', 'error');
-      // Re-enable buttons after 2 seconds
       setTimeout(() => {
         if (exportBtn) exportBtn.disabled = false;
         if (exportSinceLastBtn) exportSinceLastBtn.disabled = false;
-      }, 2000);
+      }, 1200);
     }
   } catch (error) {
     console.error('[Popup] Export error:', error);
-    updateStatus(
-      error instanceof Error ? error.message : 'Failed to export transactions',
-      'error'
-    );
-    // Re-enable buttons after 2 seconds
+    updateStatus(error instanceof Error ? error.message : 'Failed to export transactions', 'error');
     setTimeout(() => {
       if (exportBtn) exportBtn.disabled = false;
       if (exportSinceLastBtn) exportSinceLastBtn.disabled = false;
-    }, 2000);
+    }, 1200);
   }
 }
 
-/**
- * Handle export since last
- */
 async function handleExportSinceLast() {
   if (!currentAccountId) return;
-  
+
   const lastExport = await getLastExportInfo(currentAccountId);
   if (!lastExport) return;
-  
-  // Set date range from day after last export to today
-  const lastDate = new Date(lastExport.date);
-  lastDate.setDate(lastDate.getDate() + 1); // Start from day after last export
-  
-  if (startDateInput) startDateInput.value = lastDate.toISOString().split('T')[0];
-  if (endDateInput) endDateInput.value = new Date().toISOString().split('T')[0];
-  
-  // Clear active quick range button
-  document.querySelectorAll('.quick-range button').forEach(btn => btn.classList.remove('active'));
-  
+
+  if (!lastExport.lastTransactionId) {
+    const lastDate = new Date(lastExport.date);
+    lastDate.setDate(lastDate.getDate() + 1);
+
+    if (startDateInput) startDateInput.value = lastDate.toISOString().split('T')[0];
+    if (endDateInput) endDateInput.value = new Date().toISOString().split('T')[0];
+
+    document.querySelectorAll('.quick-range button').forEach((btn) => btn.classList.remove('active'));
+  }
+
   await handleExport(true);
 }
 
-/**
- * Initialize popup UI
- */
 async function init() {
-  console.log('[Popup] Initializing...');
-  
   try {
-    // Step 1: Check authentication
+    const preferredFormat = await getPreferredFormat();
+    if (formatSelect) {
+      formatSelect.value = preferredFormat;
+    }
+
     const isAuthenticated = await checkAuth();
-    
+
     if (!isAuthenticated) {
       updateStatus('Extracting authentication from cookie...', 'info');
       if (exportBtn) exportBtn.disabled = true;
 
       try {
         const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
-        console.log('[Popup] CHECK_AUTH response:', response);
-        
         if (!response || !response.authenticated) {
           updateStatus('Please log into my.wealthsimple.com to authenticate', 'error');
           if (exportBtn) exportBtn.disabled = true;
@@ -258,69 +251,63 @@ async function init() {
         return;
       }
     }
-    
-    // Step 2: Check if we're on an account page
+
     const accountInfo = await getCurrentAccountInfo();
-    
+
     if (!accountInfo.isAccountPage) {
       updateStatus('Please navigate to a specific account page to export transactions', 'info');
       if (exportBtn) exportBtn.disabled = true;
       return;
     }
-    
-    // Step 3: We have auth and we're on an account page
+
     currentAccountId = accountInfo.accountId;
-    
-    // Show date range controls
+
     if (dateRangeSection) dateRangeSection.style.display = 'block';
-    
-    // Set default date range
+    if (formatSection) formatSection.style.display = 'block';
+
     setDateRange(30);
-    
-    // Update last export info
+
     if (currentAccountId) {
       await updateLastExportInfo(currentAccountId);
     }
-    
+
     const accountDisplay = accountInfo.accountName || accountInfo.accountId || 'this account';
     updateStatus(`Ready to export ${accountDisplay}`, 'success');
     if (exportBtn) exportBtn.disabled = false;
-    
   } catch (error) {
     console.error('[Popup] Init error:', error);
     updateStatus('Initialization error', 'error');
   }
 }
 
-// Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[Popup] DOM loaded');
-  
   statusDiv = document.getElementById('status') as HTMLDivElement;
   exportBtn = document.getElementById('exportBtn') as HTMLButtonElement;
   exportSinceLastBtn = document.getElementById('exportSinceLastBtn') as HTMLButtonElement;
   startDateInput = document.getElementById('startDate') as HTMLInputElement;
   endDateInput = document.getElementById('endDate') as HTMLInputElement;
   dateRangeSection = document.getElementById('dateRangeSection') as HTMLDivElement;
+  formatSection = document.getElementById('formatSection') as HTMLDivElement;
+  formatSelect = document.getElementById('formatSelect') as HTMLSelectElement;
   lastExportInfo = document.getElementById('lastExportInfo') as HTMLDivElement;
 
-  if (!statusDiv || !exportBtn) {
-    console.error('[Popup] Failed to find DOM elements');
+  if (!statusDiv || !exportBtn || !formatSelect) {
     return;
   }
 
-  // Event listeners
   exportBtn.addEventListener('click', () => handleExport(false));
   if (exportSinceLastBtn) {
     exportSinceLastBtn.addEventListener('click', handleExportSinceLast);
   }
-  
-  // Quick range buttons
+
+  formatSelect.addEventListener('change', () => {
+    savePreferredFormat(getSelectedFormat());
+  });
+
   document.getElementById('range7d')?.addEventListener('click', () => setDateRange(7));
   document.getElementById('range30d')?.addEventListener('click', () => setDateRange(30));
   document.getElementById('range90d')?.addEventListener('click', () => setDateRange(90));
   document.getElementById('range1y')?.addEventListener('click', () => setDateRange(365));
 
-  // Initialize
   init();
 });

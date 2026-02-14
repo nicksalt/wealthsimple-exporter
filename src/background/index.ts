@@ -5,7 +5,8 @@
  */
 
 import { fetchAccounts, fetchTransactions } from './transactionService';
-import { generateCSV } from '../utils/exporters';
+import { generateExportFile } from '../utils/exporters';
+import type { ExportFormat } from '../utils/exporters';
 
 interface AuthData {
   authToken: string;
@@ -80,6 +81,7 @@ async function handleExportTransactions(
   startDate: string | null,
   endDate: string | null,
   lastTransactionId: string | null,
+  format: ExportFormat,
   sendResponse: (response: {
     success: boolean;
     error?: string;
@@ -210,25 +212,29 @@ async function handleExportTransactions(
       return;
     }
 
-    console.log(`[Background] Found ${exportTransactions.length} transactions, generating CSV...`);
+    console.log(`[Background] Found ${exportTransactions.length} transactions, generating ${format.toUpperCase()}...`);
 
-    // Step 5: Generate CSV
-    const csvContent = generateCSV(exportTransactions);
-    console.log(`[Background] CSV generated, length: ${csvContent.length} characters`);
-    console.log(`[Background] CSV preview (first 200 chars):`, csvContent.substring(0, 200));
+    const exportFile = generateExportFile(exportTransactions, format, {
+      accountId: targetAccount.id,
+      accountType: targetAccount.unifiedAccountType || targetAccount.type,
+      currency: targetAccount.currency,
+      org: 'WEALTHSIMPLE',
+      fid: '1001',
+    });
+    console.log(`[Background] ${format.toUpperCase()} generated, length: ${exportFile.content.length} characters`);
 
     // Step 6: Download file
     const accountName = targetAccount.nickname || targetAccount.id;
     const safeAccountName = accountName.replace(/[^a-zA-Z0-9-_]/g, '-');
-    const filename = `wealthsimple-${safeAccountName}-${dateRange.endDate}.csv`;
+    const filename = `wealthsimple-${safeAccountName}-${dateRange.endDate}.${exportFile.extension}`;
 
     console.log(`[Background] Attempting download of ${filename}...`);
 
     try {
       // Use data URL (works in service workers, unlike blob URLs)
-      const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
+      const dataUrl = `data:${exportFile.mimeType},` + encodeURIComponent(exportFile.content);
 
-      console.log(`[Background] Data URL created, CSV length: ${csvContent.length} characters`);
+      console.log(`[Background] Data URL created, export length: ${exportFile.content.length} characters`);
 
       const downloadId = await chrome.downloads.download({
         url: dataUrl,
@@ -290,8 +296,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const startDate = message.startDate || null;
     const endDate = message.endDate || null;
     const lastTransactionId = message.lastTransactionId || null;
+    const format: ExportFormat = ['csv', 'ofx', 'qfx'].includes(message.format)
+      ? message.format
+      : 'csv';
     console.log('[Background] Export requested for account:', accountId, 'Date range:', startDate, 'to', endDate);
-    handleExportTransactions(accountId, startDate, endDate, lastTransactionId, sendResponse);
+    handleExportTransactions(accountId, startDate, endDate, lastTransactionId, format, sendResponse);
     return true; // Keep channel open for async response
   }
 

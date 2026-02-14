@@ -6,8 +6,11 @@ interface AccountInfo {
   isAccountPage: boolean;
 }
 
+type ExportFormat = 'csv' | 'ofx' | 'qfx';
+
 let exportUIInjected = false;
 let contentAccountId: string | null = null;
+const EXPORT_FORMAT_KEY = 'preferredExportFormat';
 
 /**
  * Detect current theme (light/dark)
@@ -186,6 +189,27 @@ async function saveContentExportInfo(
     await chrome.storage.local.set({ [key]: { date, count, lastTransactionId } });
   } catch (error) {
     console.error('[Content] Failed to save export info:', error);
+  }
+}
+
+async function getPreferredExportFormat(): Promise<ExportFormat> {
+  try {
+    const result = await chrome.storage.local.get([EXPORT_FORMAT_KEY]);
+    const format = result[EXPORT_FORMAT_KEY];
+    if (format === 'csv' || format === 'ofx' || format === 'qfx') {
+      return format;
+    }
+  } catch (error) {
+    console.error('[Content] Failed to get preferred export format:', error);
+  }
+  return 'csv';
+}
+
+async function savePreferredExportFormat(format: ExportFormat) {
+  try {
+    await chrome.storage.local.set({ [EXPORT_FORMAT_KEY]: format });
+  } catch (error) {
+    console.error('[Content] Failed to save preferred export format:', error);
   }
 }
 
@@ -444,6 +468,14 @@ function injectExportUI(accountId: string): boolean {
       <div id="ws-last-export-info" style="display: none; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 12px; padding: 8px; background: var(--ws-export-input-bg); border-radius: 6px;"></div>
       
       <div style="display: flex; gap: 8px; flex-direction: column;">
+        <div>
+          <label style="display: block; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 4px;">Format</label>
+          <select id="ws-export-format" style="width: 100%; padding: 8px; background: var(--ws-export-input-bg); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); font-size: 14px;">
+            <option value="csv">CSV</option>
+            <option value="ofx">OFX</option>
+            <option value="qfx">QFX (Quicken)</option>
+          </select>
+        </div>
         <button id="ws-export-btn" style="width: 100%; padding: 12px; background: #5F3DC4; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;">Export Transactions</button>
         <button id="ws-export-since-last" style="display: none; width: 100%; padding: 10px; background: var(--ws-export-input-bg); border: 1px solid #5F3DC4; border-radius: 6px; color: #5F3DC4; cursor: pointer; font-size: 13px;">Export Since Last</button>
       </div>
@@ -485,7 +517,24 @@ function setupExportPanel(accountId: string) {
   const endDateInput = document.getElementById('ws-end-date') as HTMLInputElement;
   const lastExportInfo = document.getElementById('ws-last-export-info');
   const exportStatus = document.getElementById('ws-export-status');
+  const formatSelect = document.getElementById('ws-export-format') as HTMLSelectElement;
   let exportSinceLastRequested = false;
+
+  const selectedFormat = (): ExportFormat => {
+    const value = formatSelect?.value;
+    if (value === 'ofx' || value === 'qfx') return value;
+    return 'csv';
+  };
+
+  getPreferredExportFormat().then((format) => {
+    if (formatSelect) {
+      formatSelect.value = format;
+    }
+  });
+
+  formatSelect?.addEventListener('change', () => {
+    void savePreferredExportFormat(selectedFormat());
+  });
 
   // Load last export info
   getContentLastExportInfo(accountId).then(info => {
@@ -558,6 +607,7 @@ function setupExportPanel(accountId: string) {
         accountId: accountId,
         startDate: startDateInput.value,
         endDate: endDateInput.value,
+        format: selectedFormat(),
         lastTransactionId: exportSinceLastRequested ? lastExport?.lastTransactionId || null : null,
       });
       exportSinceLastRequested = false;

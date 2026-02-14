@@ -41,6 +41,24 @@
     .date-range {
       margin-bottom: 16px;
     }
+    .format-row {
+      margin-bottom: 16px;
+    }
+    .format-row label {
+      display: block;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    .format-row select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+      background-color: #fff;
+    }
     .date-range label {
       display: block;
       font-size: 12px;
@@ -139,6 +157,15 @@
   <div id="app">
     <h1>Wealthsimple Exporter</h1>
     <div id="status" class="info">Checking authentication...</div>
+
+    <div class="format-row" id="formatSection" style="display: none;">
+      <label for="formatSelect">Export Format</label>
+      <select id="formatSelect">
+        <option value="csv">CSV</option>
+        <option value="ofx">OFX</option>
+        <option value="qfx">QFX (Quicken)</option>
+      </select>
+    </div>
     
     <div class="date-range" id="dateRangeSection" style="display: none;">
       <label>Date Range</label>
