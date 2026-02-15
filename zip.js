@@ -29,5 +29,11 @@ archive.on('error', function(err) {
 });
 
 archive.pipe(output);
-archive.directory('dist/', false);
+
+// Add dist/ contents but exclude .vite directory
+archive.glob('**/*', {
+  cwd: 'dist/',
+  ignore: ['.vite/**']
+});
+
 archive.finalize();
