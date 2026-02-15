@@ -9,12 +9,13 @@ build
 .env*
 # Test artifacts
 tests-results
+test-results
 screenshot.png
+.playwright-profile
 
 # Session/Keyring data if added
 .python-session.json
 .playwright-mcp/**
 # Sensitive financial data
 *.csv
-*.png
 *.zip
