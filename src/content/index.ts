@@ -112,7 +112,6 @@ function extractAccountInfo(): AccountInfo {
   if (accountDetailsMatch) {
     accountId = accountDetailsMatch[1];
     isAccountPage = true;
-    console.log('[Content] Detected account details page:', accountId);
   }
 
   // Try to extract account name from page title or heading
@@ -139,8 +138,6 @@ function extractAccountInfo(): AccountInfo {
       }
     }
   }
-
-  console.log('[Content] Account detection:', { accountId, accountName, isAccountPage, url });
 
   return { accountId, accountName, isAccountPage };
 }
@@ -169,8 +166,7 @@ async function getContentLastExportInfo(
     const key = `lastExport_${accountId}`;
     const result = await chrome.storage.local.get([key]);
     return result[key] || null;
-  } catch (error) {
-    console.error('[Content] Failed to get last export info:', error);
+  } catch {
     return null;
   }
 }
@@ -187,8 +183,8 @@ async function saveContentExportInfo(
   try {
     const key = `lastExport_${accountId}`;
     await chrome.storage.local.set({ [key]: { date, count, lastTransactionId } });
-  } catch (error) {
-    console.error('[Content] Failed to save export info:', error);
+  } catch {
+    // Storage write failed silently
   }
 }
 
@@ -199,8 +195,8 @@ async function getPreferredExportFormat(): Promise<ExportFormat> {
     if (format === 'csv' || format === 'ofx' || format === 'qfx') {
       return format;
     }
-  } catch (error) {
-    console.error('[Content] Failed to get preferred export format:', error);
+  } catch {
+    // Fallback to default
   }
   return 'csv';
 }
@@ -208,8 +204,8 @@ async function getPreferredExportFormat(): Promise<ExportFormat> {
 async function savePreferredExportFormat(format: ExportFormat) {
   try {
     await chrome.storage.local.set({ [EXPORT_FORMAT_KEY]: format });
-  } catch (error) {
-    console.error('[Content] Failed to save preferred export format:', error);
+  } catch {
+    // Storage write failed silently
   }
 }
 
@@ -218,12 +214,8 @@ async function savePreferredExportFormat(format: ExportFormat) {
  */
 function injectExportUI(accountId: string): boolean {
   if (exportUIInjected) {
-    console.log('[Content] Export UI already injected');
     return true;
   }
-
-  console.log('[Content] Attempting to inject export UI...');
-
 
   // Find the sidebar container with the action buttons
   // Strategy 1: Look for standard cash/spend account action buttons
@@ -233,9 +225,6 @@ function injectExportUI(accountId: string): boolean {
   // Based on user snippet: <div class="sc-11fh42v-0 sc-on1vxn-0 ivtWPS haLzPS">
   // We want to find the parent container or inject next to these buttons
   const tradingButtonRows = document.querySelectorAll('.sc-11fh42v-0.sc-on1vxn-0.ivtWPS.haLzPS');
-
-  console.log('[Content] Found', buttonContainers.length, 'potential standard containers');
-  console.log('[Content] Found', tradingButtonRows.length, 'potential trading containers');
 
   let targetContainer: Element | null = null;
   let referenceButton: HTMLButtonElement | null = null;
@@ -263,7 +252,6 @@ function injectExportUI(accountId: string): boolean {
       targetContainer = container;
       referenceButton = container.querySelector('button');
       injectionMode = 'append';
-      console.log('[Content] Found standard target container');
       break;
     }
   }
@@ -283,8 +271,7 @@ function injectExportUI(accountId: string): boolean {
         // Ideally we want to be in the parent of this row
         if (row.parentElement) {
           targetContainer = row.parentElement;
-          injectionMode = 'append'; // Append to the parent (which holds the button row)
-          console.log('[Content] Found trading target container (parent of button row)');
+          injectionMode = 'append';
         } else {
           targetContainer = row;
           injectionMode = 'append';
@@ -307,7 +294,6 @@ function injectExportUI(accountId: string): boolean {
           // Find a button inside this container to use as reference
           referenceButton = parent.querySelector('button');
           injectionMode = 'append';
-          console.log('[Content] Found target via "Total cash available" text');
           break;
         }
       }
@@ -315,11 +301,8 @@ function injectExportUI(accountId: string): boolean {
   }
 
   if (!targetContainer) {
-    console.log('[Content] Could not find sidebar action buttons container');
     return false;
   }
-
-  console.log('[Content] Inecting export panel...');
 
   // Get default dates
   const { startDate, endDate } = getContentDateRange(30);
@@ -330,7 +313,6 @@ function injectExportUI(accountId: string): boolean {
   buttonWrapper.className = 'sc-11fh42v-0 sc-on1vxn-0 dwHOys haLzPS';
   buttonWrapper.id = 'ws-exporter-button';
 
-  // Create the button only; the panel/overlay live at document.body to avoid stacking contexts.
   buttonWrapper.innerHTML = `
     <button type="button" role="button" width="100%" class="sc-6gl6fi-0 gfuRMt sc-ss742j-0 kBsKnu" id="ws-export-toggle-btn">
       <div class="sc-11fh42v-0 sc-lgsj5-0 fIYxOg iHJZiL" style="color: currentColor;">
@@ -352,7 +334,6 @@ function injectExportUI(accountId: string): boolean {
     }
   }
 
-  // --- Dynamic Style Copying ---
   const applyStyles = () => {
     if (!referenceButton) return;
 
@@ -407,20 +388,15 @@ function injectExportUI(accountId: string): boolean {
     }
   };
 
-  // Initial Apply
   applyStyles();
 
-  // Watch for theme changes on the Reference Button to re-apply styles
   if (referenceButton) {
     const styleObserver = new MutationObserver(() => {
       applyStyles();
     });
-    // Watch attribute changes on the button itself (class changes)
     styleObserver.observe(referenceButton, { attributes: true, attributeFilter: ['class', 'style'] });
 
-    // Also watch the body/html for theme changes to trigger a re-compute
     const themeObserver = new MutationObserver(() => {
-      // Give a slight tick for CSS variables to update
       setTimeout(applyStyles, 50);
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -499,7 +475,6 @@ function injectExportUI(accountId: string): boolean {
 
   exportUIInjected = true;
   contentAccountId = accountId;
-  console.log('[Content] Export UI injected successfully');
   return true;
 }
 
@@ -650,7 +625,7 @@ function setupExportPanel(accountId: string) {
         exportBtn.textContent = 'Export Transactions';
         exportBtn.removeAttribute('disabled');
       }
-    } catch (error) {
+    } catch {
       exportSinceLastRequested = false;
       exportStatus.textContent = 'Export failed';
       exportStatus.style.color = '#f87171';
@@ -727,8 +702,6 @@ function tryInjectUI() {
         if (retries < maxRetries) {
           retries++;
           setTimeout(attemptInject, pollInterval);
-        } else {
-          console.log('[Content] Injection failed after max retries');
         }
       };
 
@@ -750,7 +723,6 @@ const observer = new MutationObserver(() => {
   const currentUrl = window.location.href;
   if (currentUrl !== lastUrl) {
     lastUrl = currentUrl;
-    console.log('[Content] URL changed, updating account info');
     const accountInfo = extractAccountInfo();
 
     // Try to inject UI on new page
@@ -771,8 +743,6 @@ const observer = new MutationObserver(() => {
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
-
-console.log('[Content] Wealthsimple Exporter content script loaded');
 
 // Initialize theme
 updateTheme();

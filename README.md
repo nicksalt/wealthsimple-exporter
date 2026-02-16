@@ -4,6 +4,8 @@
 
 A privacy-focused browser extension for exporting Wealthsimple transactions to CSV, OFX, and QFX. Designed for users of Actual Budget, YNAB, and Quicken who need more granular export options than native monthly statements.
 
+Inspired in part by [ws-api-python](https://github.com/gboudreau/ws-api-python), an unofficial Python API for Wealthsimple.
+
 ---
 
 ## ✨ Features

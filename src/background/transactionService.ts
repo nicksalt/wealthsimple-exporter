@@ -1,6 +1,5 @@
 /**
  * Transaction Service for fetching and normalizing Wealthsimple data
- * Ported from python-reference/ws_api/wealthsimple_api.py
  */
 
 import { FETCH_ALL_ACCOUNT_FINANCIALS, FETCH_ACTIVITY_FEED_ITEMS } from '../utils/queries';
@@ -233,11 +232,7 @@ function resolveAmount(activity: Activity, isCreditCard: boolean = false): numbe
     return Math.abs(rawAmount);
   }
 
-  console.log('[resolveAmount] WARNING: ambiguous amount for activity:', {
-    type: activity.type,
-    subType: activity.subType,
-    rawAmount,
-  });
+  // Ambiguous type — return raw amount as-is
   return rawAmount;
 }
 
@@ -262,7 +257,7 @@ function deriveAction(a: Activity): string {
 
 /**
  * Generate a human-readable description from an activity
- * Ported from python-reference/ws_api/formatters.py
+ * Generate a human-readable description from activity data
  */
 function generateDescription(a: Activity, accountMap?: Map<string, string>): string {
   const type = a.type;

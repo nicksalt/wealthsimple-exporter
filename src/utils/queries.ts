@@ -1,6 +1,5 @@
 /**
  * GraphQL query strings for Wealthsimple API
- * Ported from python-reference/ws_api/graphql_queries.py
  */
 
 export const FETCH_ALL_ACCOUNT_FINANCIALS = `query FetchAllAccountFinancials($identityId: ID!, $startDate: Date, $pageSize: Int = 25, $cursor: String) {

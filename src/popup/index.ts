@@ -60,8 +60,8 @@ async function getPreferredFormat(): Promise<ExportFormat> {
     if (value === 'ofx' || value === 'qfx' || value === 'csv') {
       return value;
     }
-  } catch (error) {
-    console.error('[Popup] Failed to load preferred format:', error);
+  } catch {
+    // Fallback to default
   }
 
   return 'csv';
@@ -70,8 +70,8 @@ async function getPreferredFormat(): Promise<ExportFormat> {
 async function savePreferredFormat(format: ExportFormat) {
   try {
     await chrome.storage.local.set({ [EXPORT_FORMAT_KEY]: format });
-  } catch (error) {
-    console.error('[Popup] Failed to save preferred format:', error);
+  } catch {
+    // Storage write failed silently
   }
 }
 
@@ -80,8 +80,7 @@ async function getLastExportInfo(accountId: string): Promise<LastExportInfo | nu
     const key = `lastExport_${accountId}`;
     const result = await chrome.storage.local.get([key]);
     return result[key] || null;
-  } catch (error) {
-    console.error('[Popup] Failed to get last export info:', error);
+  } catch {
     return null;
   }
 }
@@ -95,8 +94,8 @@ async function saveExportInfo(
   try {
     const key = `lastExport_${accountId}`;
     await chrome.storage.local.set({ [key]: { date, count, lastTransactionId: lastTransactionId || undefined } });
-  } catch (error) {
-    console.error('[Popup] Failed to save export info:', error);
+  } catch {
+    // Storage write failed silently
   }
 }
 
@@ -122,8 +121,7 @@ async function checkAuth(): Promise<boolean> {
   try {
     const result = await chrome.storage.local.get(['authToken']);
     return !!result.authToken;
-  } catch (error) {
-    console.error('[Popup] Failed to check auth:', error);
+  } catch {
     return false;
   }
 }
@@ -139,7 +137,7 @@ async function getCurrentAccountInfo(): Promise<{ accountId: string | null; acco
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_ACCOUNT_INFO' });
     return response;
   } catch (error) {
-    console.error('[Popup] Failed to get account info:', error);
+    // Content script not responding, try URL fallback
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab.url) {
       const match = tab.url.match(/\/app\/account-details\/([a-zA-Z0-9-_]+)/);
@@ -196,7 +194,7 @@ async function handleExport(sinceLast: boolean = false) {
       }, 1200);
     }
   } catch (error) {
-    console.error('[Popup] Export error:', error);
+    // Export failed
     updateStatus(error instanceof Error ? error.message : 'Failed to export transactions', 'error');
     setTimeout(() => {
       if (exportBtn) exportBtn.disabled = false;
@@ -244,8 +242,8 @@ async function init() {
           if (exportBtn) exportBtn.disabled = true;
           return;
         }
-      } catch (error) {
-        console.error('[Popup] CHECK_AUTH error:', error);
+      } catch {
+        // Auth check failed
         updateStatus('Please log into my.wealthsimple.com to authenticate', 'error');
         if (exportBtn) exportBtn.disabled = true;
         return;
@@ -274,8 +272,7 @@ async function init() {
     const accountDisplay = accountInfo.accountName || accountInfo.accountId || 'this account';
     updateStatus(`Ready to export ${accountDisplay}`, 'success');
     if (exportBtn) exportBtn.disabled = false;
-  } catch (error) {
-    console.error('[Popup] Init error:', error);
+  } catch {
     updateStatus('Initialization error', 'error');
   }
 }
