@@ -1,8 +1,17 @@
 {
   "name": "wealthsimple-exporter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Chrome extension to export Wealthsimple transactions to CSV/OFX/QFX",
+  "homepage": "https://github.com/nicksalt/wealthsimple-exporter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicksalt/wealthsimple-exporter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nicksalt/wealthsimple-exporter/issues"
+  },
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
