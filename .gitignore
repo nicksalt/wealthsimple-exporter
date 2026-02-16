@@ -19,3 +19,4 @@ screenshot.png
 # Sensitive financial data
 *.csv
 *.zip
+.claude/**

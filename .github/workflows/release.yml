@@ -22,16 +22,18 @@ jobs:
           
       - name: Install dependencies
         run: npm ci
-        
-      - name: Run Tests
+
+      - name: Run unit tests
         run: npm test -- --run
-        
+
       - name: Build Extension
         run: npm run build
         
       - name: Zip Build
         if: startsWith(github.ref, 'refs/tags/')
-        run: zip -r wealthsimple-exporter-${{ github.ref_name }}.zip dist
+        run: |
+          npm run zip
+          mv wealthsimple-exporter.zip wealthsimple-exporter-${{ github.ref_name }}.zip
         
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
