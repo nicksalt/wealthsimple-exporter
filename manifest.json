@@ -3,7 +3,7 @@
   "name": "Wealthsimple Exporter",
   "version": "0.1.1",
   "description": "Export your Wealthsimple transactions directly from the browser.",
-  "permissions": ["storage", "activeTab", "cookies", "downloads", "webNavigation"],
+  "permissions": ["storage", "activeTab", "cookies", "downloads"],
   "host_permissions": ["https://*.wealthsimple.com/*"],
   "icons": {
     "16": "assets/icons/icon16.png",

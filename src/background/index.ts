@@ -35,12 +35,6 @@ async function extractAuthFromCookie(): Promise<AuthData | null> {
       return null;
     }
 
-    // Store in chrome.storage.local for popup access
-    await chrome.storage.local.set({
-      authToken: authData.access_token,
-      identityId: authData.identity_canonical_id,
-    });
-
     return {
       authToken: authData.access_token,
       identityId: authData.identity_canonical_id,
@@ -271,17 +265,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-// Initialize: Extract auth from cookie on extension load
+// Clean up auth data persisted by earlier versions (see issue #3)
 chrome.runtime.onInstalled.addListener(() => {
-  extractAuthFromCookie();
+  chrome.storage.local.remove(['authToken', 'identityId']);
 });
-
-// Extract auth when user navigates to Wealthsimple
-chrome.webNavigation?.onCompleted?.addListener(
-  (details) => {
-    if (details.frameId === 0) {
-      extractAuthFromCookie();
-    }
-  },
-  { url: [{ hostSuffix: 'wealthsimple.com' }] }
-);
