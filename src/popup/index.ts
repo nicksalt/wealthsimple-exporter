@@ -119,8 +119,8 @@ async function updateLastExportInfo(accountId: string) {
 
 async function checkAuth(): Promise<boolean> {
   try {
-    const result = await chrome.storage.local.get(['authToken']);
-    return !!result.authToken;
+    const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
+    return !!response?.authenticated;
   } catch {
     return false;
   }
@@ -232,22 +232,9 @@ async function init() {
     const isAuthenticated = await checkAuth();
 
     if (!isAuthenticated) {
-      updateStatus('Extracting authentication from cookie...', 'info');
+      updateStatus('Please log into my.wealthsimple.com to authenticate', 'error');
       if (exportBtn) exportBtn.disabled = true;
-
-      try {
-        const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
-        if (!response || !response.authenticated) {
-          updateStatus('Please log into my.wealthsimple.com to authenticate', 'error');
-          if (exportBtn) exportBtn.disabled = true;
-          return;
-        }
-      } catch {
-        // Auth check failed
-        updateStatus('Please log into my.wealthsimple.com to authenticate', 'error');
-        if (exportBtn) exportBtn.disabled = true;
-        return;
-      }
+      return;
     }
 
     const accountInfo = await getCurrentAccountInfo();
