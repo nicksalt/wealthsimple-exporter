@@ -11,8 +11,10 @@ Inspired in part by [ws-api-python](https://github.com/gboudreau/ws-api-python),
 ## ✨ Features
 
 - **Direct UI Integration**: Adds an "Export Transactions" button directly to the Wealthsimple sidebar.
-- **Multiple Formats**: Export as **CSV**, **OFX**, or **QFX** seamlessly.
-- **YNAB Optimized**: CSV output is pre-formatted to match YNAB's import requirements.
+- **Multiple Formats**: Export as **CSV**, **CSV (signed amounts)**, **OFX**, or **QFX**.
+- **YNAB Optimized**: The default CSV uses YNAB's `Outflow`/`Inflow` columns.
+- **Signed CSV**: For tools that want one `Amount` column (negative = outflow), such as Pocketsmith or MS Money.
+- **Credit Card OFX**: Credit card accounts export as proper OFX credit card statements.
 - **Incremental Syncing**: Tracks `lastTransactionId` to help prevent duplicate imports into your budget.
 - **Privacy First**: Local processing with zero telemetry or external data leakage.
 
@@ -26,6 +28,19 @@ Inspired in part by [ws-api-python](https://github.com/gboudreau/ws-api-python),
 | **Other Variants** | Community Validation Needed 🔍 |
 
 *If you encounter an unsupported transaction or account variant, please open an issue with a redacted payload sample.*
+
+## 📁 Choosing a Format
+
+| Format | Best for | Notes |
+| :--- | :--- | :--- |
+| **CSV** | YNAB, Actual Budget | `Date, Payee, Memo, Outflow, Inflow`. Investment accounts use a trading layout with a signed `Amount`. |
+| **CSV (signed amounts)** | Pocketsmith, MS Money, spreadsheets | `Date, Payee, Memo, Amount`, with negative amounts for outflows. |
+| **OFX** | Pocketsmith, GnuCash, Actual Budget, most OFX importers | Credit card accounts use the OFX credit card statement format. |
+| **QFX** | Quicken (see below) | OFX plus an Intuit `INTU.BID`. |
+
+### Quicken and QFX
+
+Quicken only accepts QFX files from institutions registered with Intuit, and Wealthsimple isn't registered. Quicken may therefore reject the file with "unable to verify the financial institution". The extension doesn't put another bank's ID in the file to get around this, because that misrepresents where the file came from. If Quicken rejects the QFX, export **CSV (signed amounts)** and use Quicken's CSV import instead, where your Quicken version supports it.
 
 ## 🔒 Privacy & Security
 
