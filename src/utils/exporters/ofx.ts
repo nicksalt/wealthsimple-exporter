@@ -79,6 +79,17 @@ function mapTrnType(transaction: NormalizedTransaction): string {
   return transaction.amount < 0 ? 'DEBIT' : 'CREDIT';
 }
 
+export function isCreditCardAccount(options: OfxGenerationOptions): boolean {
+  const accountType = (options.accountType || '').toLowerCase();
+  return /credit[\s_-]*card/.test(accountType) || options.accountId.includes('credit-card');
+}
+
+// WITHDRAWAL isn't a valid OFX TRNTYPE; card statements use DEBIT/CREDIT so strict
+// importers accept them. Bank statements keep mapTrnType for backward compatibility.
+function mapCreditCardTrnType(transaction: NormalizedTransaction): string {
+  return transaction.amount < 0 ? 'DEBIT' : 'CREDIT';
+}
+
 function mapAccountType(accountType?: string): string {
   const normalized = (accountType || '').toLowerCase();
   if (normalized.includes('savings')) return 'SAVINGS';
@@ -98,6 +109,7 @@ function buildOfxBody(
   const ledgerAmount = transactions.reduce((sum, transaction) => sum + transaction.amount, 0);
   const org = sanitizeValue(options.org || 'WEALTHSIMPLE');
   const fid = sanitizeValue(options.fid || '1001');
+  const creditCard = isCreditCardAccount(options);
 
   const transactionsBlock = sorted
     .map((transaction) => {
@@ -107,7 +119,7 @@ function buildOfxBody(
 
       return [
         '<STMTTRN>',
-        `<TRNTYPE>${mapTrnType(transaction)}`,
+        `<TRNTYPE>${creditCard ? mapCreditCardTrnType(transaction) : mapTrnType(transaction)}`,
         `<DTPOSTED>${formatDateOnly(transaction.date)}`,
         `<TRNAMT>${transaction.amount.toFixed(2)}`,
         `<FITID>${generateFitId(transaction)}`,
@@ -122,6 +134,20 @@ function buildOfxBody(
     ? `<FI>\n<ORG>${org}\n<FID>${fid}\n</FI>\n<INTU.BID>${sanitizeValue(options.intuBid || fid)}`
     : `<FI>\n<ORG>${org}\n<FID>${fid}\n</FI>`;
 
+  // Credit cards use the OFX credit card statement aggregates instead of bank ones
+  const msgSet = creditCard ? 'CREDITCARDMSGSRSV1' : 'BANKMSGSRSV1';
+  const trnRs = creditCard ? 'CCSTMTTRNRS' : 'STMTTRNRS';
+  const stmtRs = creditCard ? 'CCSTMTRS' : 'STMTRS';
+  const accountFrom = creditCard
+    ? ['<CCACCTFROM>', `<ACCTID>${sanitizeValue(options.accountId)}`, '</CCACCTFROM>']
+    : [
+        '<BANKACCTFROM>',
+        '<BANKID>000000000',
+        `<ACCTID>${sanitizeValue(options.accountId)}`,
+        `<ACCTTYPE>${mapAccountType(options.accountType)}`,
+        '</BANKACCTFROM>',
+      ];
+
   return [
     '<OFX>',
     '<SIGNONMSGSRSV1>',
@@ -135,20 +161,16 @@ function buildOfxBody(
     fiBlock,
     '</SONRS>',
     '</SIGNONMSGSRSV1>',
-    '<BANKMSGSRSV1>',
-    '<STMTTRNRS>',
+    `<${msgSet}>`,
+    `<${trnRs}>`,
     '<TRNUID>1',
     '<STATUS>',
     '<CODE>0',
     '<SEVERITY>INFO',
     '</STATUS>',
-    '<STMTRS>',
+    `<${stmtRs}>`,
     `<CURDEF>${sanitizeValue(currency)}`,
-    '<BANKACCTFROM>',
-    '<BANKID>000000000',
-    `<ACCTID>${sanitizeValue(options.accountId)}`,
-    `<ACCTTYPE>${mapAccountType(options.accountType)}`,
-    '</BANKACCTFROM>',
+    ...accountFrom,
     '<BANKTRANLIST>',
     `<DTSTART>${formatDateOnly(startDate)}`,
     `<DTEND>${formatDateOnly(endDate)}`,
@@ -158,9 +180,9 @@ function buildOfxBody(
     `<BALAMT>${ledgerAmount.toFixed(2)}`,
     `<DTASOF>${formatOfxDate(now)}`,
     '</LEDGERBAL>',
-    '</STMTRS>',
-    '</STMTTRNRS>',
-    '</BANKMSGSRSV1>',
+    `</${stmtRs}>`,
+    `</${trnRs}>`,
+    `</${msgSet}>`,
     '</OFX>',
   ].join('\n');
 }

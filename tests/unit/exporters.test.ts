@@ -300,6 +300,68 @@ describe('OFX/QFX exporters', () => {
     expect(qfx).not.toContain('<NAME>Withdrawal: EFT Utility Co');
   });
 
+  describe('credit card statements', () => {
+    const purchase: NormalizedTransaction = {
+      id: 'cc-1',
+      date: '2024-02-01',
+      description: 'Starbucks',
+      amount: -6.5,
+      currency: 'CAD',
+      category: 'Purchase',
+      accountId: 'ca-credit-card-abc',
+    };
+    const payment: NormalizedTransaction = {
+      ...purchase,
+      id: 'cc-2',
+      description: 'Credit card payment',
+      amount: 200,
+      category: 'Credit Card Payment',
+    };
+
+    it('uses credit card aggregates for credit card accounts', () => {
+      const ofx = generateOFX([purchase, payment], { accountId: 'ca-credit-card-abc', accountType: 'CREDIT_CARD' });
+      expect(ofx).toContain('<CREDITCARDMSGSRSV1>');
+      expect(ofx).toContain('<CCSTMTTRNRS>');
+      expect(ofx).toContain('<CCSTMTRS>');
+      expect(ofx).toContain('<CCACCTFROM>\n<ACCTID>ca-credit-card-abc\n</CCACCTFROM>');
+      expect(ofx).toContain('</CCSTMTRS>\n</CCSTMTTRNRS>\n</CREDITCARDMSGSRSV1>');
+      expect(ofx).not.toContain('BANKMSGSRSV1');
+      expect(ofx).not.toContain('BANKACCTFROM');
+      expect(ofx).not.toContain('<ACCTTYPE>');
+    });
+
+    it('uses spec-valid DEBIT/CREDIT transaction types for card activity', () => {
+      const ofx = generateOFX([purchase, payment], { accountId: 'ca-credit-card-abc', accountType: 'CREDIT_CARD' });
+      expect(ofx).toContain('<TRNTYPE>DEBIT\n<DTPOSTED>20240201120000\n<TRNAMT>-6.50');
+      expect(ofx).toContain('<TRNTYPE>CREDIT\n<DTPOSTED>20240201120000\n<TRNAMT>200.00');
+      expect(ofx).not.toContain('<TRNTYPE>WITHDRAWAL');
+    });
+
+    it('detects credit cards from the account ID when the type is missing', () => {
+      const ofx = generateOFX([purchase], { accountId: 'ca-credit-card-abc' });
+      expect(ofx).toContain('<CREDITCARDMSGSRSV1>');
+    });
+
+    it('keeps FITIDs identical to bank-style output so re-imports dedupe', () => {
+      const card = generateOFX([purchase], { accountId: 'ca-credit-card-abc', accountType: 'CREDIT_CARD' });
+      const bank = generateOFX([purchase], { accountId: 'cash-123', accountType: 'CASH' });
+      expect(card).toContain('<FITID>cc-1');
+      expect(bank).toContain('<FITID>cc-1');
+    });
+
+    it('applies the credit card structure to QFX too', () => {
+      const qfx = generateQFX([purchase], { accountId: 'ca-credit-card-abc', accountType: 'CREDIT_CARD' });
+      expect(qfx).toContain('<INTU.BID>');
+      expect(qfx).toContain('<CCSTMTRS>');
+    });
+
+    it('does not treat a non-card credit account as a credit card', () => {
+      const ofx = generateOFX([purchase], { accountId: 'loc-1', accountType: 'LINE_OF_CREDIT' });
+      expect(ofx).toContain('<BANKMSGSRSV1>');
+      expect(ofx).toContain('<ACCTTYPE>CREDITLINE');
+    });
+  });
+
   it('should dispatch export content and extension by format', () => {
     const csv = generateExportFile([transaction], 'csv', { accountId: 'cash-123' });
     const ofx = generateExportFile([transaction], 'ofx', { accountId: 'cash-123' });
