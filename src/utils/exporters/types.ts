@@ -1,6 +1,12 @@
 import type { NormalizedTransaction } from '../types';
 
-export type ExportFormat = 'csv' | 'ofx' | 'qfx';
+export const EXPORT_FORMATS = ['csv', 'csv-signed', 'ofx', 'qfx'] as const;
+
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+export function isExportFormat(value: unknown): value is ExportFormat {
+  return typeof value === 'string' && (EXPORT_FORMATS as readonly string[]).includes(value);
+}
 
 export interface ExportFile {
   content: string;
