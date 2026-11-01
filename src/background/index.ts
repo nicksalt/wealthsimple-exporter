@@ -5,7 +5,7 @@
  */
 
 import { fetchAccounts, fetchTransactions } from './transactionService';
-import { generateExportFile } from '../utils/exporters';
+import { generateExportFile, isExportFormat } from '../utils/exporters';
 import type { ExportFormat } from '../utils/exporters';
 
 interface AuthData {
@@ -244,9 +244,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const startDate = message.startDate || null;
     const endDate = message.endDate || null;
     const lastTransactionId = message.lastTransactionId || null;
-    const format: ExportFormat = ['csv', 'ofx', 'qfx'].includes(message.format)
-      ? message.format
-      : 'csv';
+    const format: ExportFormat = isExportFormat(message.format) ? message.format : 'csv';
     handleExportTransactions(accountId, startDate, endDate, lastTransactionId, format, sendResponse);
     return true; // Keep channel open for async response
   }

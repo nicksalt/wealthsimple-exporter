@@ -8,7 +8,11 @@ import {
   generateOFX,
   generateQFX,
   generateExportFile,
+  generateSignedCSV,
+  EXPORT_FORMATS,
+  isExportFormat,
 } from '../../src/utils/exporters';
+import { readFileSync } from 'node:fs';
 import { generateFitId } from '../../src/utils/exporters/ofx';
 import type { NormalizedTransaction } from '../../src/utils/types';
 
@@ -211,6 +215,92 @@ describe('generateCSV', () => {
       const csv = generateCSV([transaction]);
       expect(csv).toContain('"Transfer: ""Special, Account""\nWith newline"');
     });
+  });
+});
+
+describe('generateSignedCSV', () => {
+  const outflow: NormalizedTransaction = {
+    id: 's-1',
+    date: '2024-03-01',
+    description: 'Withdrawal: Bill pay Rogers, Inc',
+    amount: -95.5,
+    currency: 'CAD',
+    category: 'Withdrawal',
+    accountId: 'cash-123',
+  };
+  const inflow: NormalizedTransaction = {
+    ...outflow,
+    id: 's-2',
+    description: 'Deposit: AFT Payroll',
+    amount: 2500,
+    category: 'Deposit',
+  };
+
+  it('uses a single signed Amount column', () => {
+    const lines = generateSignedCSV([outflow, inflow]).split('\n');
+    expect(lines[0]).toBe('Date,Payee,Memo,Amount');
+    expect(lines[1]).toBe('2024-03-01,"Rogers, Inc",Withdrawal | cash-123,-95.50');
+    expect(lines[2]).toBe('2024-03-01,Payroll,Deposit | cash-123,2500.00');
+  });
+
+  it('formats zero as a non-negative amount', () => {
+    const zero = { ...outflow, amount: 0 };
+    expect(generateSignedCSV([zero]).split('\n')[1]).toMatch(/,0\.00$/);
+  });
+
+  it('falls back to the signed trading layout for investment activity', () => {
+    const buy: NormalizedTransaction = {
+      ...outflow,
+      description: 'Buy 2 x VFV',
+      action: 'Buy',
+      symbol: 'VFV',
+      quantity: 2,
+      price: 120,
+      amount: -240,
+    };
+    expect(generateSignedCSV([buy])).toBe(generateCSV([buy]));
+  });
+
+  it('does not change the default CSV layout', () => {
+    expect(generateCSV([outflow]).split('\n')[0]).toBe('Date,Payee,Memo,Outflow,Inflow');
+  });
+
+  it('is exported as a .csv file', () => {
+    const file = generateExportFile([outflow], 'csv-signed', { accountId: 'cash-123' });
+    expect(file.extension).toBe('csv');
+    expect(file.mimeType).toBe('text/csv;charset=utf-8');
+    expect(file.content.split('\n')[0]).toBe('Date,Payee,Memo,Amount');
+  });
+});
+
+describe('export format validation', () => {
+  it('accepts every existing saved preference value', () => {
+    for (const format of ['csv', 'ofx', 'qfx', 'csv-signed']) {
+      expect(isExportFormat(format)).toBe(true);
+    }
+  });
+
+  it('rejects unknown values so callers fall back to CSV', () => {
+    expect(isExportFormat('xlsx')).toBe(false);
+    expect(isExportFormat(undefined)).toBe(false);
+    expect(isExportFormat(null)).toBe(false);
+  });
+
+  it('keeps the content script format list in sync', () => {
+    const content = readFileSync('src/content/index.ts', 'utf8');
+    const match = content.match(/const EXPORT_FORMATS = \[(.*?)\] as const;/);
+    expect(match).not.toBeNull();
+    const contentFormats = match![1].split(',').map((v) => v.trim().replace(/'/g, ''));
+    expect(contentFormats).toEqual([...EXPORT_FORMATS]);
+  });
+
+  it('offers every format in both the popup and the injected panel', () => {
+    const popup = readFileSync('src/popup/index.html', 'utf8');
+    const content = readFileSync('src/content/index.ts', 'utf8');
+    for (const format of EXPORT_FORMATS) {
+      expect(popup).toContain(`<option value="${format}">`);
+      expect(content).toContain(`<option value="${format}">`);
+    }
   });
 });
 

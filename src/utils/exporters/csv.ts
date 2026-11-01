@@ -77,15 +77,46 @@ function generateBudgetingCSV(transactions: NormalizedTransaction[]): string {
   return [headers.join(','), ...rows].join('\n');
 }
 
-export function generateCSV(transactions: NormalizedTransaction[]): string {
-  const hasTradingData = transactions.some(
+function generateSignedBudgetingCSV(transactions: NormalizedTransaction[]): string {
+  const headers = ['Date', 'Payee', 'Memo', 'Amount'];
+
+  const rows = transactions.map((t) => {
+    const payee = derivePayee(t.description);
+    const memoParts = [];
+    if (t.category) memoParts.push(t.category);
+    if (t.accountId) memoParts.push(t.accountId);
+    const memo = memoParts.join(' | ');
+
+    const fields = [t.date, escapeCSVField(payee), escapeCSVField(memo), t.amount.toFixed(2)];
+    return fields.join(',');
+  });
+
+  return [headers.join(','), ...rows].join('\n');
+}
+
+function hasTradingData(transactions: NormalizedTransaction[]): boolean {
+  return transactions.some(
     (t) =>
       (!!t.symbol && t.symbol !== 'CAD' && t.symbol !== 'USD') ||
       (!!t.quantity && t.quantity > 0) ||
       (t.action && ['Buy', 'Sell'].includes(t.action))
   );
+}
 
-  if (hasTradingData) {
+/**
+ * Single signed Amount column (negative = outflow) for tools that don't
+ * support YNAB-style Outflow/Inflow columns. Trading CSVs are already signed.
+ */
+export function generateSignedCSV(transactions: NormalizedTransaction[]): string {
+  if (hasTradingData(transactions)) {
+    return generateTradingCSV(transactions);
+  }
+
+  return generateSignedBudgetingCSV(transactions);
+}
+
+export function generateCSV(transactions: NormalizedTransaction[]): string {
+  if (hasTradingData(transactions)) {
     return generateTradingCSV(transactions);
   }
 

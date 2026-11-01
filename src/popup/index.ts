@@ -1,4 +1,5 @@
-import type { ExportFormat } from '../utils/exporters';
+import { isExportFormat } from '../utils/exporters/types';
+import type { ExportFormat } from '../utils/exporters/types';
 
 let statusDiv: HTMLDivElement | null = null;
 let exportBtn: HTMLButtonElement | null = null;
@@ -49,15 +50,14 @@ function setDateRange(days: number) {
 
 function getSelectedFormat(): ExportFormat {
   const value = formatSelect?.value;
-  if (value === 'ofx' || value === 'qfx') return value;
-  return 'csv';
+  return isExportFormat(value) ? value : 'csv';
 }
 
 async function getPreferredFormat(): Promise<ExportFormat> {
   try {
     const result = await chrome.storage.local.get([EXPORT_FORMAT_KEY]);
     const value = result[EXPORT_FORMAT_KEY];
-    if (value === 'ofx' || value === 'qfx' || value === 'csv') {
+    if (isExportFormat(value)) {
       return value;
     }
   } catch {

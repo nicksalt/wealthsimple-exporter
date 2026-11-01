@@ -6,7 +6,14 @@ interface AccountInfo {
   isAccountPage: boolean;
 }
 
-type ExportFormat = 'csv' | 'ofx' | 'qfx';
+// Kept local (not imported) so the content script stays a single self-contained bundle.
+// Must match EXPORT_FORMATS in src/utils/exporters/types.ts.
+const EXPORT_FORMATS = ['csv', 'csv-signed', 'ofx', 'qfx'] as const;
+type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+function isExportFormat(value: unknown): value is ExportFormat {
+  return typeof value === 'string' && (EXPORT_FORMATS as readonly string[]).includes(value);
+}
 
 let exportUIInjected = false;
 let contentAccountId: string | null = null;
@@ -192,7 +199,7 @@ async function getPreferredExportFormat(): Promise<ExportFormat> {
   try {
     const result = await chrome.storage.local.get([EXPORT_FORMAT_KEY]);
     const format = result[EXPORT_FORMAT_KEY];
-    if (format === 'csv' || format === 'ofx' || format === 'qfx') {
+    if (isExportFormat(format)) {
       return format;
     }
   } catch {
@@ -448,6 +455,7 @@ function injectExportUI(accountId: string): boolean {
           <label style="display: block; color: var(--ws-export-subtext); font-size: 12px; margin-bottom: 4px;">Format</label>
           <select id="ws-export-format" style="width: 100%; padding: 8px; background: var(--ws-export-input-bg); border: 1px solid var(--ws-export-input-border); border-radius: 6px; color: var(--ws-export-text); font-size: 14px;">
             <option value="csv">CSV</option>
+            <option value="csv-signed">CSV (signed amounts)</option>
             <option value="ofx">OFX</option>
             <option value="qfx">QFX (Quicken)</option>
           </select>
@@ -497,8 +505,7 @@ function setupExportPanel(accountId: string) {
 
   const selectedFormat = (): ExportFormat => {
     const value = formatSelect?.value;
-    if (value === 'ofx' || value === 'qfx') return value;
-    return 'csv';
+    return isExportFormat(value) ? value : 'csv';
   };
 
   getPreferredExportFormat().then((format) => {
