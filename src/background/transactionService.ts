@@ -192,7 +192,8 @@ function resolveAmount(activity: Activity, isCreditCard: boolean = false): numbe
   // Outflows
   if (
     ['DIY_BUY', 'MANAGED_BUY', 'CRYPTO_BUY', 'WITHDRAWAL', 'FEE', 'NON_RESIDENT_TAX', 'TAX'].includes(type) ||
-    (type === 'CREDIT_CARD' && subType === 'PURCHASE')
+    (type === 'CREDIT_CARD' && subType === 'PURCHASE') ||
+    (type === 'SPEND' && subType === 'PREPAID')
   ) {
     return -Math.abs(rawAmount);
   }
@@ -316,6 +317,9 @@ function generateDescription(a: Activity, accountMap?: Map<string, string>): str
 
   if (type === 'CREDIT_CARD_PAYMENT') return 'Credit card payment';
 
+  // Prepaid card spend (e.g. SPEND/PREPAID)
+  if (type === 'SPEND' && a.spendMerchant) return a.spendMerchant;
+
   // Internal transfers
   if (type === 'INTERNAL_TRANSFER' || type === 'ASSET_MOVEMENT') {
     const dir = subType === 'SOURCE' ? 'Transfer out' : 'Transfer in';
@@ -388,6 +392,7 @@ function deriveCategory(a: Activity): string {
   if (type === 'CREDIT_CARD' && subType === 'PAYMENT') return 'Credit Card Payment';
   if (type === 'CREDIT_CARD' && (subType === 'REFUND' || subType === 'HOLD')) return 'Refund';
   if (type === 'CREDIT_CARD_PAYMENT') return 'Credit Card Payment';
+  if (type === 'SPEND' && subType === 'PREPAID') return 'Purchase';
   if (type === 'REFUND') return 'Refund';
   if (type === 'FEE') return 'Fee';
   if (type === 'NON_RESIDENT_TAX') return 'Tax';

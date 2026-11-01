@@ -327,3 +327,35 @@ describe('normalizeTransaction', () => {
     });
   });
 });
+
+describe('Prepaid card spend (SPEND/PREPAID)', () => {
+  const prepaidSpend = createMockActivity({
+    type: 'SPEND',
+    subType: 'PREPAID',
+    amount: '4.25',
+    amountSign: 'DEBIT',
+    spendMerchant: 'Tim Hortons',
+  });
+
+  it('uses the merchant name as the description', () => {
+    expect(normalizeTransaction(prepaidSpend).description).toBe('Tim Hortons');
+  });
+
+  it('categorizes prepaid spend as Purchase', () => {
+    expect(normalizeTransaction(prepaidSpend).category).toBe('Purchase');
+  });
+
+  it('keeps the API-provided sign', () => {
+    expect(normalizeTransaction(prepaidSpend).amount).toBe(-4.25);
+  });
+
+  it('treats prepaid spend as an outflow when the sign is missing', () => {
+    const unsigned = { ...prepaidSpend, amountSign: null };
+    expect(normalizeTransaction(unsigned).amount).toBe(-4.25);
+  });
+
+  it('falls back to the previous description when no merchant is present', () => {
+    const noMerchant = { ...prepaidSpend, spendMerchant: null };
+    expect(normalizeTransaction(noMerchant).description).toBe('SPEND: PREPAID');
+  });
+});
